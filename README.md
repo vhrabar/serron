@@ -3,6 +3,7 @@
 ![Python](https://img.shields.io/badge/python-%E2%89%A53.12-blue?style=for-the-badge&logo=python)
 ![PyTorch](https://img.shields.io/badge/pytorch-%E2%89%A52.12-ee4c2c?style=for-the-badge&logo=pytorch)
 ![CUDA](https://img.shields.io/badge/cuda-13.X-76b900?style=for-the-badge&logo=nvidia)
+![PyPI Version](https://img.shields.io/pypi/v/serron?style=for-the-badge&logo=pypi&logoColor=orange)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge&logo=opensourceinitiative)
 
 
@@ -10,7 +11,7 @@ Mathematical Morphology-based self-attention module for PyTorch (CUDA) using Fla
 
 ## Layout
 
-This is a [uv](https://docs.astral.sh/uv/) workspace:
+This is an [uv](https://docs.astral.sh/uv/) workspace:
 
 - `packages/serron` - the published kernel package ([README](packages/morphottention/README.md)).
 

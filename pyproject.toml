@@ -2,6 +2,7 @@
 name = "serron-workspace"
 version = "0"
 dependencies = [
+    "scikit-build-core>=0.12.2",
     "serron",
 ]
 
@@ -18,7 +19,7 @@ dev = [
     "pytest-benchmark",
     "ruff",
     "mypy",
-    "scikit-build-core==0.12.2",
+    "scikit-build-core==1.0.2",
     "cmake",
     "ninja"
 ]
@@ -28,7 +29,7 @@ no-build-isolation-package = ["serron"]
 
 
 [tool.ruff]
-line-length = 120
+line-length = 130
 
 
 [tool.ruff.lint]
