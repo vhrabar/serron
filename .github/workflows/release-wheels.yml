@@ -74,7 +74,7 @@ jobs:
           python -m pip install --upgrade pip
           # CUDA-enabled torch used only to compile against (no build isolation).
           python -m pip install --index-url "${TORCH_INDEX}" "torch>=2.12"
-          python -m pip install scikit-build-core==0.12.2 cmake ninja build auditwheel
+          python -m pip install scikit-build-core==1.0.2 cmake ninja build auditwheel
           python -m build --wheel --no-isolation "${PKG_DIR}" --outdir dist_raw
 
       - name: Repair wheel (retag manylinux, do not vendor torch/cuda)
@@ -123,7 +123,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install --index-url "${env:TORCH_INDEX}" "torch>=2.12"
-          python -m pip install scikit-build-core==0.12.2 cmake ninja build
+          python -m pip install scikit-build-core==1.0.2 cmake ninja build
           python -m build --wheel --no-isolation "${env:PKG_DIR}" --outdir dist
 
       - uses: actions/upload-artifact@v4
