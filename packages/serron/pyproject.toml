@@ -1,7 +1,7 @@
 [project]
 name = "serron"
 version = "0.2.1"
-description = "PyTorch extension for matematical morphology with CUDA support."
+description = "PyTorch extension for mathematical morphology with CUDA support."
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [
