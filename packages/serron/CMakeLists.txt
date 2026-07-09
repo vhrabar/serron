@@ -53,7 +53,7 @@ endif()
 find_package(CUDAToolkit REQUIRED)
 
 Python_add_library(_C MODULE WITH_SOABI
-
+        csrc/bindings.cpp
 )
 
 # -lineinfo on Debug; full device debug (-G) only when explicitly sanitizing.
@@ -93,4 +93,4 @@ if(NOT WIN32)
     )
 endif()
 
-install(TARGETS _C LIBRARY DESTINATION morphottention)
+install(TARGETS _C LIBRARY DESTINATION serron)

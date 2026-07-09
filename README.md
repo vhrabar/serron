@@ -19,6 +19,10 @@ This is a [uv](https://docs.astral.sh/uv/) workspace:
 Prebuilt wheels (CPython 3.12–3.14; Linux x86_64/aarch64, Windows x86_64) require a
 CUDA-enabled `torch >= 2.12` already installed:
 
+```bash
+pip install serron
+```
+
 
 ## Develop
 

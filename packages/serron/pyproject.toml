@@ -78,5 +78,5 @@ minimum-version = "build-system.requires"
 cmake.version = ">=3.24"
 build-dir = "build/{wheel_tag}"
 
-wheel.packages = ["torch-ext/morphottention"]
+wheel.packages = ["torch-ext/serron"]
 editable.rebuild = true
