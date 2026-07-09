@@ -1,0 +1,80 @@
+[project]
+name = "serron-workspace"
+version = "0"
+dependencies = [
+    "serron",
+]
+
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+serron = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-benchmark",
+    "ruff",
+    "mypy",
+    "scikit-build-core==0.12.2",
+    "cmake",
+    "ninja"
+]
+
+[tool.uv]
+no-build-isolation-package = ["serron"]
+
+
+[tool.ruff]
+line-length = 120
+
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "W",
+    "I",
+    "UP",
+    "B",
+    "SIM",
+    "NPY",
+    "RUF",
+]
+ignore = [
+    "E501",
+    "RUF012",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py"  = ["F401"]
+"benchmarks/*" = ["E402"]
+"tests/*"      = ["E402"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["serron"]
+
+[tool.ruff.format]
+quote-style           = "double"
+indent-style          = "space"
+docstring-code-format = true
+
+
+[tool.mypy]
+python_version       = "3.10"
+mypy_path            = "src"
+exclude              = ["^attn-bench/", "^build/", "^dist/", "/build/"]
+strict               = true
+warn_unused_ignores  = true
+warn_redundant_casts = true
+warn_unused_configs  = true
+show_error_codes     = true
+pretty               = true
+
+
+[[tool.mypy.overrides]]
+module = [
+]
+ignore_missing_imports = true

@@ -1,0 +1,60 @@
+name: Lint and Static Checks
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # uv packlage manager
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.14"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      # install dev tools
+      - name: Install dev dependencies
+        run: uv sync --no-install-project --no-install-workspace
+
+     # run formatters and linters
+      - name: Ruff format
+        run: uv run --no-sync ruff format --check .
+
+      - name: Ruff lint
+        run: uv run --no-sync ruff check --output-format=github .
+
+      # MyPy static type checker
+      - name: Mypy
+        run: uv run --no-sync mypy .
+
+  clang-format:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # uv package manager
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+     # Clang-format
+      - name: Check C++/CUDA formatting
+        run: |
+          FILES=$(git ls-files | grep -E '\.(cpp|cc|cxx|h|hpp|cu|cuh)$' || true)
+          if [ -n "$FILES" ]; then
+            uvx clang-format@18.1.8 --dry-run --Werror $FILES
+          else
+            echo "No C++/CUDA files to check."
+          fi

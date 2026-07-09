@@ -1,0 +1,79 @@
+# -------------------------
+# Python
+# -------------------------
+
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Python build
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# pip
+pip-wheel-metadata/
+
+# virtual environments
+.venv/
+
+# pytest
+.pytest_cache/
+
+# mypy
+.mypy_cache/
+
+# Ruff / linters
+.ruff_cache/
+
+# -------------------------
+# CUDA / C++ build outputs
+# -------------------------
+
+*.o
+*.obj
+*.a
+*.out
+*.ptx
+*.cubin
+*.fatbin
+
+# compiled extensions
+*.so
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake-build-*/
+
+
+
+# -------------------------
+# Editor / IDE
+# -------------------------
+
+.vscode/
+.idea/
+.run/
+
+# -------------------------
+# GitHub Actions artifacts
+# -------------------------
+
+artifacts/
+
+# -------------------------
+# Datasets
+# -------------------------
+
+/data/
+
+# -------------------------
+# Profilers
+# -------------------------
+
+*.nsys-rep
+*.ncu-rep

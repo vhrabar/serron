@@ -1,0 +1,70 @@
+# .clang-format
+# CUDA C++ style for serron (PyTorch extension).
+# Include categories adapted from NVIDIA/cuCollections and pytorch/pytorch.
+
+BasedOnStyle:  LLVM
+Language:      Cpp
+Standard:      c++20
+
+# whitespace / indentation-
+IndentWidth:          4
+TabWidth:             4
+UseTab:               Never
+ColumnLimit:          120
+NamespaceIndentation: None
+MaxEmptyLinesToKeep:  1
+
+# pointers / references
+PointerAlignment:       Left
+ReferenceAlignment:     Left
+DerivePointerAlignment: false
+
+# braces / short forms
+BreakBeforeBraces:                  Attach
+AllowShortFunctionsOnASingleLine:   Empty
+AllowShortIfStatementsOnASingleLine: false
+
+# spacing / alignment
+SpaceBeforeParens:    ControlStatements
+AlignAfterOpenBracket: Align
+AlignOperands:         Align
+
+# templates / arg packing (kernel-friendly)
+AlwaysBreakTemplateDeclarations: Yes
+BinPackArguments:                true
+BinPackParameters:               true
+
+# CUDA qualifier macros: keep clang-format from misparsing kernel code
+AttributeMacros:
+  - __global__
+  - __device__
+  - __host__
+  - __shared__
+  - __constant__
+  - __managed__
+  - __forceinline__
+  - __noinline__
+  - __launch_bounds__
+  - __restrict__
+  - DEVICE
+  - HOST_DEVICE
+  - KERNEL
+
+SortIncludes:   true
+IncludeBlocks:  Regroup
+IncludeCategories:
+  # 1. This project's own headers
+  - Regex:    '^"'
+    Priority: 1
+  # 2. Thrust / CUB / libcu++
+  - Regex:    '^<(thrust|cub|cuda)/'
+    Priority: 2
+  # 3. CUDA runtime / driver headers
+  - Regex:    '^<(cooperative_groups|cuda\.h|cuda_runtime|cuda_runtime_api|device_types|math_constants|nvtx3)'
+    Priority: 3
+  # 4. Other library headers
+  - Regex:    '^<.*\..*'
+    Priority: 4
+  # 5. C++ standard library
+  - Regex:    '^<[^.]+'
+    Priority: 5

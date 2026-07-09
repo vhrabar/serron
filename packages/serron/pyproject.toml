@@ -1,0 +1,82 @@
+[project]
+name = "serron"
+version = "0.2.1"
+description = "PyTorch extension for matematical morphology with CUDA support."
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [
+    { name = "Vedran Hrabar", email = "vedran.hrabar@outlook.com" },
+]
+license = { text = "MIT" }
+keywords = ["cuda", "pytorch", "morphology",]
+
+classifiers = [
+    "Development Status :: 0 - Planning",
+
+    "Environment :: GPU",
+    "Environment :: GPU :: NVIDIA CUDA",
+    "Environment :: GPU :: NVIDIA CUDA :: 13",
+
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+
+    "License :: OSI Approved :: MIT License",
+
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: Implementation :: CPython",
+
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+    "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+
+    "Typing :: Typed",
+]
+
+dependencies = [
+    "torch>=2.12",
+]
+
+[project.urls]
+repository = "https://github.com/vhrabar/serron"
+documentation =  "https://github.com/vhrabar/serron/wiki"
+"Bug Tracker" = "https://github.com/vhrabar/serron/issues"
+
+
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu132"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch" }
+torchvision = { index = "pytorch" }
+
+
+[build-system]
+requires = ["scikit-build-core==0.12.2"]
+build-backend = "scikit_build_core.build"
+
+
+[dependency-groups]
+build = ["scikit-build-core==0.12.2", "cmake", "ninja"]
+
+
+
+[tool.scikit-build]
+minimum-version = "build-system.requires"
+cmake.version = ">=3.24"
+build-dir = "build/{wheel_tag}"
+
+wheel.packages = ["torch-ext/morphottention"]
+editable.rebuild = true

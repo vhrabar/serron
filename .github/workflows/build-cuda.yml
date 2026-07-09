@@ -1,0 +1,87 @@
+name: CUDA Compile Check
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - 'csrc/**'
+      - '**/*.cu'
+      - '**/*.cuh'
+      - '**/*.cpp'
+      - '**/*.h'
+      - '**/CMakeLists.txt'
+      - 'pyproject.toml'
+      - 'uv.lock'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'csrc/**'
+      - '**/*.cu'
+      - '**/*.cuh'
+      - '**/*.cpp'
+      - '**/*.h'
+      - '**/CMakeLists.txt'
+      - 'pyproject.toml'
+      - 'uv.lock'
+
+jobs:
+  cuda-build:
+    runs-on: ubuntu-26.04
+    env:
+      CUDA_HOME: /usr/local/cuda-13.3
+      CUDAToolkit_ROOT: /usr/local/cuda-13.3
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # free disk space
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost /opt/hostedtoolcache/CodeQL
+          sudo apt-get clean
+          df -h
+
+      # cache
+      - name: Cache CUDA toolkit
+        id: cache-cuda
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/cuda-13.3
+          key: cuda-13.3-${{ runner.os }}-v1
+
+      # Install CUDA compiler
+      - name: Install CUDA compiler
+        if: steps.cache-cuda.outputs.cache-hit != 'true'
+        run: |
+          wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2604/x86_64/cuda-keyring_1.1-1_all.deb
+          sudo dpkg -i cuda-keyring_1.1-1_all.deb
+          sudo apt-get update -q
+          sudo apt-get install -y cuda-compiler-13-3 cuda-libraries-dev-13-3
+
+      - name: Add CUDA to PATH
+        run: echo "/usr/local/cuda-13.3/bin" >> "$GITHUB_PATH"
+
+      - name: Verify nvcc
+        run: nvcc --version
+
+      # uv package manager
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.14"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      # Installs project dependencies
+      - name: Install build dependencies
+        run: uv sync --package serron --no-dev --group build --no-install-workspace
+
+      # Build CUDA extension
+      - name: Compile CUDA extension
+        run: uv build --package serron --wheel --no-build-isolation
+        env:
+          MAX_JOBS: "2"
