@@ -13,6 +13,9 @@ env:
   PKG_DIR: packages/serron
   CUDA_MAJOR_MINOR: "13-2"
   TORCH_INDEX: https://download.pytorch.org/whl/cu132
+  PIP_RETRIES: "5"
+  PIP_TIMEOUT: "60"
+  PIP_RESUME_RETRIES: "5"
 
 jobs:
   # Source distribution

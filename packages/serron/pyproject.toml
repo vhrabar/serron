@@ -11,7 +11,7 @@ license = { text = "MIT" }
 keywords = ["cuda", "pytorch", "morphology",]
 
 classifiers = [
-    "Development Status :: 0 - Planning",
+    "Development Status :: 1 - Planning",
 
     "Environment :: GPU",
     "Environment :: GPU :: NVIDIA CUDA",

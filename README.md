@@ -7,7 +7,7 @@
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge&logo=opensourceinitiative)
 
 
-Mathematical Morphology-based self-attention module for PyTorch (CUDA) using Flash-style kernel fusion.
+Mathematical Morphology module for PyTorch (CUDA), providing differentiable operators and learnable network layers.
 
 ## Layout
 
