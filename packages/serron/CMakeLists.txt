@@ -54,6 +54,7 @@ find_package(CUDAToolkit REQUIRED)
 
 Python_add_library(_C MODULE WITH_SOABI
         csrc/bindings.cpp
+        csrc/cuda/morphology.cu
 )
 
 # -lineinfo on Debug; full device debug (-G) only when explicitly sanitizing.
