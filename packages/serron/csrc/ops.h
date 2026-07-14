@@ -5,6 +5,14 @@
 
 namespace serron {
 
+/**
+ * Grayscale erosion (sliding minimum) of @p input by structuring element @p kernel.
+ *
+ * @param input   CUDA tensor of shape (N, C, H, W), floating dtype.
+ * @param kernel  CUDA structuring element of shape (kH, kW) or (C, kH, kW).
+ * @param border  Boundary mode (serron.enums.BorderMode encoding) at the image edges.
+ * @return        Eroded tensor, same shape and dtype as @p input.
+ */
 at::Tensor erode(const at::Tensor& input, const at::Tensor& kernel, int64_t border);
 at::Tensor dilate(const at::Tensor& input, const at::Tensor& kernel, int64_t border);
 
