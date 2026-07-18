@@ -2,7 +2,9 @@
 name = "serron-workspace"
 version = "0"
 dependencies = [
+    "kornia>=0.8.3",
     "scikit-build-core>=0.12.2",
+    "scipy-stubs~=1.18.0",
     "serron",
 ]
 
@@ -26,6 +28,16 @@ dev = [
 
 [tool.uv]
 no-build-isolation-package = ["serron"]
+
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+python_files = ["test_*.py", "bench_*.py"]
+addopts = "-ra --strict-markers"
+markers = [
+    "cuda: test requires a CUDA device",
+]
 
 
 [tool.ruff]
@@ -64,7 +76,7 @@ docstring-code-format = true
 
 
 [tool.mypy]
-python_version       = "3.10"
+python_version       = "3.12"
 mypy_path            = "src"
 exclude              = ["^attn-bench/", "^build/", "^dist/", "/build/"]
 strict               = true

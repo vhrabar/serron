@@ -6,7 +6,14 @@ from __future__ import annotations
 
 import torch
 
+from ._cmake_ops import ops
 from .enums import BorderMode
+
+_BORDER_TO_INT: dict[BorderMode, int] = {
+    BorderMode.REFLECT: 0,
+    BorderMode.REPLICATE: 1,
+    BorderMode.CONSTANT: 2,
+}
 
 
 def erosion(input_: torch.Tensor, kernel: torch.Tensor, *, border: BorderMode = BorderMode.REPLICATE) -> torch.Tensor:
@@ -15,9 +22,10 @@ def erosion(input_: torch.Tensor, kernel: torch.Tensor, *, border: BorderMode = 
     :param input_: input tensor
     :param kernel: kernel tensor
     :param border: border mode
-    :return: top-hat tensor
+    :return: eroded tensor
     """
-    raise NotImplementedError
+    result: torch.Tensor = ops.erode(input_, kernel, _BORDER_TO_INT[border])
+    return result
 
 
 def dilatation(input_: torch.Tensor, kernel: torch.Tensor, *, border: BorderMode = BorderMode.REPLICATE) -> torch.Tensor:
@@ -26,9 +34,10 @@ def dilatation(input_: torch.Tensor, kernel: torch.Tensor, *, border: BorderMode
     :param input_: input tensor
     :param kernel: kernel tensor
     :param border: border mode
-    :return: top-hat tensor
+    :return: dilated tensor
     """
-    raise NotImplementedError
+    result: torch.Tensor = ops.dilate(input_, kernel, _BORDER_TO_INT[border])
+    return result
 
 
 def opening(input_: torch.Tensor, kernel: torch.Tensor, *, border: BorderMode = BorderMode.REPLICATE) -> torch.Tensor:

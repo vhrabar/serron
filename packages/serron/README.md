@@ -3,7 +3,7 @@
 Mathematical Morphology module for PyTorch (CUDA), providing differentiable operators and learnable network layers.
 ## Install
 
-Prebuilt wheels are published for CPython 3.14 on Linux (x86_64, aarch64) and
+Prebuilt wheels are published for CPython 3.12–3.14 on Linux (x86_64, aarch64) and
 Windows (x86_64). A working CUDA-enabled PyTorch (`torch >= 2.12`) must already
 be installed in the environment.
 
@@ -14,7 +14,7 @@ pip install serron
 ## Usage
 
 > **Alpha:** the CUDA kernels are not wired up yet, so the operators below currently
-> raise `NotImplementedError`. 
+> raise `NotImplementedError`.
 
 Serron works on standard PyTorch tensors laid out as `(N, C, H, W)` and living on a CUDA
 device.
