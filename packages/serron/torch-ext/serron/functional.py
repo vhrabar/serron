@@ -24,7 +24,8 @@ def erosion(input_: torch.Tensor, kernel: torch.Tensor, *, border: BorderMode = 
     :param border: border mode
     :return: eroded tensor
     """
-    return ops.erode(input_, kernel, _BORDER_TO_INT[border])
+    result: torch.Tensor = ops.erode(input_, kernel, _BORDER_TO_INT[border])
+    return result
 
 
 def dilatation(input_: torch.Tensor, kernel: torch.Tensor, *, border: BorderMode = BorderMode.REPLICATE) -> torch.Tensor:
@@ -35,7 +36,8 @@ def dilatation(input_: torch.Tensor, kernel: torch.Tensor, *, border: BorderMode
     :param border: border mode
     :return: dilated tensor
     """
-    return ops.dilate(input_, kernel, _BORDER_TO_INT[border])
+    result: torch.Tensor = ops.dilate(input_, kernel, _BORDER_TO_INT[border])
+    return result
 
 
 def opening(input_: torch.Tensor, kernel: torch.Tensor, *, border: BorderMode = BorderMode.REPLICATE) -> torch.Tensor:
