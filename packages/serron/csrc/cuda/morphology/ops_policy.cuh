@@ -26,6 +26,11 @@ struct ErodeOp {
     static __device__ __forceinline__ acc_t reduce(const acc_t acc, const acc_t val) {
         return val < acc ? val : acc;
     }
+    /// d(tap)/d(se): erosion's tap is @c sample-se
+    template <typename acc_t>
+    static __device__ __forceinline__ acc_t se_grad_sign() {
+        return static_cast<acc_t>(-1);
+    }
 };
 
 struct DilateOp {
@@ -40,6 +45,11 @@ struct DilateOp {
     template <typename acc_t>
     static __device__ __forceinline__ acc_t reduce(const acc_t acc, const acc_t val) {
         return val > acc ? val : acc;
+    }
+    /// d(tap)/d(se): dilation's tap is @c sample+se
+    template <typename acc_t>
+    static __device__ __forceinline__ acc_t se_grad_sign() {
+        return static_cast<acc_t>(1);
     }
 };
 
