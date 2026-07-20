@@ -9,10 +9,18 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
     ops.def("dilate(Tensor input, Tensor kernel, int border) -> Tensor");
 }
 
-// CUDA implementations.
+// CPU implementation
+TORCH_LIBRARY_IMPL_EXPAND(TORCH_EXTENSION_NAME, CPU, ops) {
+    ops.impl("erode", &serron::erode_cpu);
+    ops.impl("dilate", &serron::dilate_cpu);
+}
+
+// CUDA implementations
+#ifdef SERRON_WITH_CUDA
 TORCH_LIBRARY_IMPL_EXPAND(TORCH_EXTENSION_NAME, CUDA, ops) {
     ops.impl("erode", &serron::erode);
     ops.impl("dilate", &serron::dilate);
 }
+#endif
 
 REGISTER_EXTENSION(TORCH_EXTENSION_NAME)
