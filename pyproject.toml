@@ -8,6 +8,10 @@ dependencies = [
     "serron",
 ]
 
+[project.optional-dependencies]
+cpu = ["serron[cpu]"]
+cu132 = ["serron[cu132]"]
+
 
 [tool.uv.workspace]
 members = ["packages/*"]
@@ -28,6 +32,12 @@ dev = [
 
 [tool.uv]
 no-build-isolation-package = ["serron"]
+conflicts = [
+    [
+        { package = "serron", extra = "cpu" },
+        { package = "serron", extra = "cu132" },
+    ],
+]
 
 
 [tool.pytest.ini_options]

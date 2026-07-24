@@ -47,6 +47,10 @@ dependencies = [
     "torch>=2.12",
 ]
 
+[project.optional-dependencies]
+cpu = ["torch>=2.12"]
+cu132 = ["torch>=2.12"]
+
 [project.urls]
 repository = "https://github.com/vhrabar/serron"
 documentation =  "https://github.com/vhrabar/serron/wiki"
@@ -54,13 +58,21 @@ documentation =  "https://github.com/vhrabar/serron/wiki"
 
 
 [[tool.uv.index]]
-name = "pytorch"
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu132"
 url = "https://download.pytorch.org/whl/cu132"
 explicit = true
 
+
 [tool.uv.sources]
-torch = { index = "pytorch" }
-torchvision = { index = "pytorch" }
+torch = [
+    { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-cu132", extra = "cu132" },
+]
 
 
 [build-system]

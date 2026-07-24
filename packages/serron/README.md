@@ -96,10 +96,37 @@ Available layers: `Erosion2d`, `Dilation2d`, `Opening2d`, `Closing2d`.
 
 ## Building from source
 
-Requires the CUDA 13.X toolkit (`nvcc`) and a matching `torch` build:
+### Clone repo
+```bash
+git clone git@github.com:vhrabar/serron.git
+cd serron
+```
+
+### Choosing a torch build
+
+`torch` is pulled from a specific wheel index via mutually-exclusive extras. Pick the
+one matching your machine — plain `uv sync` (no extra) falls back to the default
+CUDA-enabled wheel from PyPI:
 
 ```bash
-uv sync --package serron --no-dev --group build
+uv sync --extra cu132   # CUDA build
+uv sync --extra cpu     # CPU-only build
+```
+
+### Building the wheel
+
+Building the CUDA extension from source needs the CUDA 13.X toolkit (`nvcc`):
+
+```bash
+uv sync --package serron --no-dev --group build --extra cu132
+uv build --package serron --wheel --no-build-isolation
+```
+
+On a GPU-less machine, sync the CPU torch build instead, the extension then builds
+C++ only (no `nvcc` required):
+
+```bash
+uv sync --package serron --no-dev --group build --extra cpu
 uv build --package serron --wheel --no-build-isolation
 ```
 
