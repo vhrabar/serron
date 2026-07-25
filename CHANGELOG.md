@@ -6,12 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
-### Added
-
-- CPU backend for `erode` and `dilate`, registered on the `CPU` dispatch key so CPU tensors no longer require a CUDA build (#17).
-- CPU-only and CUDA 13.x build paths in the installation instructions (#17).
-
-
 ## [0.1.0] - 2026-07-18
 
 ### Added
@@ -36,6 +30,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - Initial scaffolding: build system, operator registration and stubs for the planned alpha feature set (#1, #2).
 
-[Unreleased]: https://github.com/vhrabar/serron/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/vhrabar/serron/compare/v0.1.1...HEAD
 [0.1.0]: https://github.com/vhrabar/serron/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/vhrabar/serron/releases/tag/v0.0.1
