@@ -93,8 +93,8 @@ void morphology_cpu_kernel(const scalar_t* input, const scalar_t* kernel, scalar
                     acc_t val = neutral;
                     if (ih_valid) {
                         if (int64_t iw = w + dj - anchor_w; resolve_coord(iw, W, border)) {
-                            val = Op::tap(static_cast<acc_t>(input_nc[ih_off + iw]),
-                                          static_cast<acc_t>(kernel_row[dj]));
+                            val =
+                                Op::tap(static_cast<acc_t>(input_nc[ih_off + iw]), static_cast<acc_t>(kernel_row[dj]));
                         }
                         // OoB -> neutral element (+/- inf)
                     }
