@@ -46,15 +46,15 @@ from serron import structuring_element as se
 x = torch.rand(1, 1, 256, 256, device="cuda")
 kernel = se.disk(3, device="cuda")
 
-eroded  = serron.erosion(x, kernel)
+eroded = serron.erosion(x, kernel)
 dilated = serron.dilatation(x, kernel)
-opened  = serron.opening(x, kernel)
-closed  = serron.closing(x, kernel)
+opened = serron.opening(x, kernel)
+closed = serron.closing(x, kernel)
 
 # Derived operators
-grad    = serron.gradient(x, kernel)   # dilate(x) - erode(x)
-white   = serron.top_hat(x, kernel)    # x - open(x)
-black   = serron.black_hat(x, kernel)  # close(x) - x
+grad = serron.gradient(x, kernel)  # dilate(x) - erode(x)
+white = serron.top_hat(x, kernel)  # x - open(x)
+black = serron.black_hat(x, kernel)  # close(x) - x
 
 # Control border handling
 eroded_reflect = serron.erosion(x, kernel, border=BorderMode.REFLECT)
@@ -70,11 +70,11 @@ Available operators: `erosion`, `dilatation`, `opening`, `closing`, `gradient`,
 ```python
 from serron import structuring_element as se
 
-se.square(5, device="cuda")      # (5, 5) full square
-se.cross(5, device="cuda")       # (5, 5) plus shape
-se.disk(3, device="cuda")        # (7, 7) disk, radius 3
-se.diamond(3, device="cuda")     # (7, 7) diamond, radius 3
-se.from_tensor(my_weights)       # wrap an arbitrary 2-D tensor as a grayscale SE
+se.square(5, device="cuda")  # (5, 5) full square
+se.cross(5, device="cuda")  # (5, 5) plus shape
+se.disk(3, device="cuda")  # (7, 7) disk, radius 3
+se.diamond(3, device="cuda")  # (7, 7) diamond, radius 3
+se.from_tensor(my_weights)  # wrap an arbitrary 2-D tensor as a grayscale SE
 ```
 
 ### Border modes
@@ -101,8 +101,8 @@ from serron import BorderMode
 layer = Erosion2d(channels=3, kernel_size=5, border=BorderMode.REPLICATE).cuda()
 
 x = torch.rand(8, 3, 64, 64, device="cuda")
-y = layer(x)          # forward pass; layer.weight is a trainable (C, k, k) SE
-y.sum().backward()    # gradients flow into layer.weight
+y = layer(x)  # forward pass; layer.weight is a trainable (C, k, k) SE
+y.sum().backward()  # gradients flow into layer.weight
 ```
 
 Available layers: `Erosion2d`, `Dilation2d`, `Opening2d`, `Closing2d`.
