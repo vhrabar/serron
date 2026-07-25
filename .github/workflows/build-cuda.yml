@@ -127,16 +127,21 @@ jobs:
 
           # Anything still under this tag after the draft sweep is already published.
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "::notice::$TAG is already released - bump project.version in packages/serron/pyproject.toml to draft the next one"
+            echo "::notice::$TAG is already released - bump project.version on dev to prepare the next one"
             exit 0
           fi
 
+          # Notes come from dev: main's CHANGELOG.md carries only released history.
+          git fetch --depth=1 origin dev
+          git show FETCH_HEAD:CHANGELOG.md > dev-changelog.md
+
           NOTES="$(mktemp)"
-          uvx --from python-kacl==0.7.3 kacl-cli get unreleased --no-header > "$NOTES"
+          uvx --from python-kacl==0.7.3 kacl-cli -f dev-changelog.md get unreleased --no-header > "$NOTES"
+          rm -f dev-changelog.md
 
           if [ -s "$NOTES" ]; then
             gh release create "$TAG" --draft --title "$TAG" --notes-file "$NOTES"
           else
-            echo "::warning::CHANGELOG.md has an empty Unreleased section, falling back to generated notes"
+            echo "::warning::dev CHANGELOG.md has no unreleased entries, falling back to generated notes"
             gh release create "$TAG" --draft --title "$TAG" --generate-notes
           fi
