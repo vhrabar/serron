@@ -18,8 +18,34 @@ env:
   PIP_RESUME_RETRIES: "5"
 
 jobs:
+  # Fail fast on a tag that does not match the packaged version, before an hour of wheel builds
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check tag against project.version
+        id: version
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          VERSION="$(python3 -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("packages/serron/pyproject.toml").read_text())["project"]["version"])')"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ github.event_name }}" != "release" ]; then
+            echo "::notice::manual run, skipping the tag check (version ${VERSION})"
+            exit 0
+          fi
+          if [ "$TAG" != "v${VERSION}" ]; then
+            echo "::error::release tag '$TAG' does not match project.version '$VERSION' in packages/serron/pyproject.toml"
+            exit 1
+          fi
+
   # Source distribution
   sdist:
+    needs: [verify]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,6 +68,7 @@ jobs:
 
   # Linux wheels (x86_64 + aarch64)
   linux-wheels:
+    needs: [verify]
     strategy:
       fail-fast: false
       matrix:
@@ -98,6 +125,7 @@ jobs:
 
   # Windows wheel (x86_64)
   windows-wheel:
+    needs: [verify]
     runs-on: windows-2025
     strategy:
       fail-fast: false
@@ -149,3 +177,63 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "${{ github.event.release.tag_name }}" dist/* --clobber --repo "${{ github.repository }}"
+
+  # Move the Unreleased section of CHANGELOG.md into the released version and open a pull request with the result.
+  changelog:
+    if: github.event_name == 'release'
+    needs: [verify, attach-to-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # Patch on top of main: the tag is where the release was cut from, main is where the changelog has to land.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      # Moves Unreleased into '[VERSION] - today' and rewrites the compare links per .kacl.yml.
+      - name: Patch changelog
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          if [ -z "$(uvx --from python-kacl==0.7.3 kacl-cli get unreleased --no-header)" ]; then
+            echo "::warning::CHANGELOG.md has an empty Unreleased section, nothing to patch"
+            exit 0
+          fi
+          uvx --from python-kacl==0.7.3 kacl-cli release "$VERSION" --modify --auto-link
+
+      - name: Open pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          if git diff --quiet -- CHANGELOG.md; then
+            echo "::notice::CHANGELOG.md is already up to date for $TAG"
+            exit 0
+          fi
+
+          BRANCH="changelog/${TAG}"
+          LABEL="release changelog"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git checkout -b "$BRANCH"
+          git add CHANGELOG.md
+          git commit -m "docs(changelog): patch changelog for ${TAG}"
+          git push --force-with-lease --set-upstream origin "$BRANCH"
+
+          gh label create "$LABEL" \
+            --description "Pull requests with a release changelog update" \
+            --force || true
+
+          gh pr create \
+            --title "Changelog update - \`${TAG}\`" \
+            --body "Moves the \`Unreleased\` section of \`CHANGELOG.md\` into \`${TAG}\` and refreshes the compare links." \
+            --label "$LABEL" \
+            --base main \
+            --head "$BRANCH"
