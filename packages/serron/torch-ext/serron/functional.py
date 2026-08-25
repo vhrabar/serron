@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import torch
 
-from ._cmake_ops import ops
+from .autograd import _DilateFunction, _ErodeFunction
 from .enums import BorderMode
 
 _BORDER_TO_INT: dict[BorderMode, int] = {
@@ -24,7 +24,7 @@ def erosion(input_: torch.Tensor, kernel: torch.Tensor, *, border: BorderMode = 
     :param border: border mode
     :return: eroded tensor
     """
-    result: torch.Tensor = ops.erode(input_, kernel, _BORDER_TO_INT[border])
+    result: torch.Tensor = _ErodeFunction.apply(input_, kernel, _BORDER_TO_INT[border])
     return result
 
 
@@ -36,7 +36,7 @@ def dilatation(input_: torch.Tensor, kernel: torch.Tensor, *, border: BorderMode
     :param border: border mode
     :return: dilated tensor
     """
-    result: torch.Tensor = ops.dilate(input_, kernel, _BORDER_TO_INT[border])
+    result: torch.Tensor = _DilateFunction.apply(input_, kernel, _BORDER_TO_INT[border])
     return result
 
 
