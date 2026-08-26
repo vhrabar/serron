@@ -3,6 +3,8 @@
 
 #include <torch/torch.h>
 
+#include <tuple>
+
 namespace serron {
 
 /**
@@ -44,6 +46,36 @@ at::Tensor erode_cpu(const at::Tensor& input, const at::Tensor& kernel, int64_t 
  * @return        Dilated tensor, same shape and dtype as @p input.
  */
 at::Tensor dilate_cpu(const at::Tensor& input, const at::Tensor& kernel, int64_t border);
+
+/**
+ * Backward pass of grayscale erosion.
+ *
+ * Erosion selects, per output window, the tap minimising @c sample-se; the backward scatters the upstream gradient to
+ * that selected input pixel and (with a sign flip) to the selected structuring-element cell.
+ *
+ * @param grad_output  Upstream gradient, same shape as the erosion output (N, C, H, W).
+ * @param input        The forward input, shape (N, C, H, W).
+ * @param kernel       The forward structuring element, shape (kH, kW) or (C, kH, kW).
+ * @param border       Boundary mode (serron.enums.BorderMode encoding) used in the forward pass.
+ * @return             Pair (grad_input, grad_kernel) matching the shapes of @p input and @p kernel.
+ */
+std::tuple<at::Tensor, at::Tensor> erode_backward(const at::Tensor& grad_output, const at::Tensor& input,
+                                                  const at::Tensor& kernel, int64_t border);
+
+/**
+ * Backward pass of grayscale dilation.
+ *
+ * Dilation selects, per output window, the tap maximising @c sample+se; the backward scatters the upstream gradient to
+ * that selected input pixel and to the selected structuring-element cell.
+ *
+ * @param grad_output  Upstream gradient, same shape as the dilation output (N, C, H, W).
+ * @param input        The forward input, shape (N, C, H, W).
+ * @param kernel       The forward structuring element, shape (kH, kW) or (C, kH, kW).
+ * @param border       Boundary mode (serron.enums.BorderMode encoding) used in the forward pass.
+ * @return             Pair (grad_input, grad_kernel) matching the shapes of @p input and @p kernel.
+ */
+std::tuple<at::Tensor, at::Tensor> dilate_backward(const at::Tensor& grad_output, const at::Tensor& input,
+                                                   const at::Tensor& kernel, int64_t border);
 
 } // namespace serron
 

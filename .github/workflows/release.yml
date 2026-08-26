@@ -1,0 +1,152 @@
+name: Release
+
+# Fires automatically whenever a merge to main bumps packages/serron/pyproject.toml's
+# version:
+#
+#   read VERSION from pyproject.toml -> promote CHANGELOG.md's [Unreleased] section
+#   -> commit + tag on main -> publish the release -> sync the promotion back onto dev
+
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/serron/pyproject.toml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Read the version from pyproject.toml
+        id: version
+        run: |
+          set -euo pipefail
+          VERSION="$(python3 -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("packages/serron/pyproject.toml").read_text())["project"]["version"])')"
+          case "$VERSION" in
+            [0-9]*) ;;
+            *) echo "::error::Version '$VERSION' in packages/serron/pyproject.toml must start with a digit."; exit 1 ;;
+          esac
+          {
+            echo "version=$VERSION"
+            echo "tag=v$VERSION"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Skip if this version is already released
+        id: gate
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "::notice::${TAG} is already tagged - this push didn't bump the version (or it shipped already). Nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Require notes under [Unreleased]
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          # kacl-cli's 'get' errors out (rather than printing nothing) when the
+          # section has no subsections at all, so treat any failure as "empty".
+          if ! NOTES="$(uvx --from python-kacl==0.7.3 kacl-cli get unreleased --no-header 2>/dev/null)" || [ -z "$NOTES" ]; then
+            echo "::error::packages/serron/pyproject.toml was bumped to ${{ steps.version.outputs.version }}, but CHANGELOG.md has no content under '## [Unreleased]'. Add the release notes, then push a follow-up commit to main."
+            exit 1
+          fi
+          echo "Notes found under [Unreleased]:"
+          echo "$NOTES"
+
+      - name: Promote [Unreleased] to [${{ steps.version.outputs.version }}] in CHANGELOG.md
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: uvx --from python-kacl==0.7.3 kacl-cli release "$VERSION" --modify --auto-link
+
+      - name: Commit and tag
+        if: steps.gate.outputs.skip != 'true'
+        id: commit
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Only CHANGELOG.md: pyproject.toml is already correct from the merge that
+          # triggered this run, and this push must not touch it, or the path filter
+          # above would re-trigger this workflow on the commit below.
+          git add CHANGELOG.md
+          if git diff --cached --quiet; then
+            echo "::error::Nothing changed; is CHANGELOG.md already at ${VERSION}?"
+            exit 1
+          fi
+          git commit -m "docs(changelog): promote to ${TAG}"
+          git push origin HEAD:main
+          git tag -a "$TAG" -m "serron ${VERSION}"
+          git push origin "refs/tags/${TAG}"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the release from CHANGELOG.md
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          uvx --from python-kacl==0.7.3 kacl-cli get "$VERSION" --no-header > /tmp/notes.md
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file /tmp/notes.md \
+            --target "${{ steps.commit.outputs.sha }}"
+          {
+            echo "### Published \`${TAG}\`"
+            echo ""
+            echo "$(gh release view "$TAG" --json url --jq .url)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Sync the release commit back to dev
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git fetch origin dev:refs/remotes/origin/dev
+          BRANCH="sync-main-${TAG}"
+          git checkout -b "$BRANCH" origin/dev
+          git merge --no-edit origin/main
+
+          if [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/dev)" ]; then
+            echo "dev is already up to date with main; nothing to sync."
+            exit 0
+          fi
+
+          git push --set-upstream origin "$BRANCH"
+
+          gh label create "release changelog" --description "Pull requests with a release changelog update" --force || true
+          gh pr create \
+            --title "Sync ${TAG} back to dev" \
+            --body "Merges the \`${TAG}\` version bump and changelog promotion from \`main\` back into \`dev\`, so \`dev\` picks up a fresh \`[Unreleased]\` section." \
+            --label "release changelog" \
+            --base dev \
+            --head "$BRANCH"
