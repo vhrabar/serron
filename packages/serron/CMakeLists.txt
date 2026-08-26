@@ -71,6 +71,9 @@ endif()
 set(_serron_sources
         csrc/bindings.cpp
         csrc/cpu/morphology/operators.cpp
+        
+        csrc/cuda/morphology/operators.cu
+        csrc/cuda/morphology/backward.cu        
 )
 if(SERRON_CUDA)
     list(APPEND _serron_sources
