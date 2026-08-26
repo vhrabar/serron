@@ -13,6 +13,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
     `black_hat`) into both the input and the structuring element, including the learnable layers (`Erosion2d`, `Dilation2d`,
     `Opening2d`, `Closing2d`), which can now be optimized E2E (#13, #15). CUDA only for now; CPU tensors still raise on `.backward()`.
 
+
+## [0.1.1] - 2026-07-25
+
+### Added
+
+- CPU backend for `erode` and `dilate`, registered on the `CPU` dispatch key so CPU tensors no longer require a CUDA build (#17).
+- CPU-only and CUDA 13.x build paths in the installation instructions (#17).
+- CPU backend for `erode` and `dilate`, registered on the `CPU` dispatch key so CPU tensors no longer require a CUDA build (#17).
+- CPU-only and CUDA 13.x build paths in the installation instructions (#17).
+
 ## [0.1.0] - 2026-07-18
 
 ### Added
