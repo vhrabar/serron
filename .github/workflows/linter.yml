@@ -53,6 +53,26 @@ jobs:
       - name: Verify CHANGELOG.md
         run: uvx --from python-kacl==0.7.3 kacl-cli verify
 
+      - name: Require changelog notes if this PR bumps the version
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          BASE_VERSION="$(git show origin/main:packages/serron/pyproject.toml | python3 -c 'import sys, tomllib; print(tomllib.load(sys.stdin.buffer)["project"]["version"])')"
+          HEAD_VERSION="$(python3 -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("packages/serron/pyproject.toml").read_text())["project"]["version"])')"
+          if [ "$BASE_VERSION" = "$HEAD_VERSION" ]; then
+            echo "Version unchanged ($HEAD_VERSION); this PR won't trigger a release."
+            exit 0
+          fi
+          echo "Version bumped $BASE_VERSION -> $HEAD_VERSION; checking for release notes..."
+          # kacl-cli's 'get' errors out (rather than printing nothing) when the
+          # section has no subsections at all, so treat any failure as "empty".
+          if ! NOTES="$(uvx --from python-kacl==0.7.3 kacl-cli get unreleased --no-header 2>/dev/null)" || [ -z "$NOTES" ]; then
+            echo "::error::packages/serron/pyproject.toml is bumped to ${HEAD_VERSION}, but CHANGELOG.md has no content under '## [Unreleased]'. Merging as-is will bump the version with an empty changelog and fail release.yml after merge. Add release notes under '## [Unreleased]' first."
+            exit 1
+          fi
+          echo "Notes found under [Unreleased]."
+
   clang-format:
     runs-on: ubuntu-latest
     steps:
