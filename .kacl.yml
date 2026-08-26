@@ -1,0 +1,13 @@
+kacl:
+  file: CHANGELOG.md
+
+  links:
+    auto_generate: True
+    host_url: https://github.com/vhrabar/serron
+    compare_versions_template: '{host}/compare/v{previous_version}...v{version}'
+    unreleased_changes_template: '{host}/compare/v{latest_version}...HEAD'
+    initial_version_template: '{host}/releases/tag/v{version}'
+
+  git:
+    commit: False
+    tag: False

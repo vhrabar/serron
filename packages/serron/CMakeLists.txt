@@ -11,20 +11,34 @@ if(NOT DEFINED CMAKE_CUDA_COMPILER)
     endif()
 endif()
 
+include(CheckLanguage)
+check_language(CUDA)
+if(CMAKE_CUDA_COMPILER)
+    set(_serron_cuda_default ON)
+else()
+    set(_serron_cuda_default OFF)
+endif()
+option(SERRON_CUDA "Build the CUDA backend (requires nvcc)" ${_serron_cuda_default})
 
-project(morphottention LANGUAGES CXX CUDA)
+# CXX is always enabled; CUDA only when the backend is requested.
+project(morphottention LANGUAGES CXX)
 
-#  23 host / 20 device
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CUDA_STANDARD 20)
-set(CMAKE_CUDA_STANDARD_REQUIRED ON)
-
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-set(CMAKE_CUDA_SEPARABLE_COMPILATION OFF)
 
-set(CMAKE_CUDA_ARCHITECTURES 90 100 120)
-set(TORCH_CUDA_ARCH_LIST "9.0;10.0;12.0")
+if(SERRON_CUDA)
+    enable_language(CUDA)
+    #  20 device
+    set(CMAKE_CUDA_STANDARD 20)
+    set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+    set(CMAKE_CUDA_SEPARABLE_COMPILATION OFF)
+    set(CMAKE_CUDA_ARCHITECTURES 90 100 120)
+    set(TORCH_CUDA_ARCH_LIST "9.0;10.0;12.0")
+    message(STATUS "serron: building with CUDA backend")
+else()
+    message(STATUS "serron: building C++ only (no CUDA backend)")
+endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -50,13 +64,28 @@ if(NOT EXISTS "${TORCH_LIB_DIR}")
     message(FATAL_ERROR "Could not locate torch lib dir at: ${TORCH_LIB_DIR}")
 endif()
 
-find_package(CUDAToolkit REQUIRED)
+if(SERRON_CUDA)
+    find_package(CUDAToolkit REQUIRED)
+endif()
 
-Python_add_library(_C MODULE WITH_SOABI
+set(_serron_sources
         csrc/bindings.cpp
+        csrc/cpu/morphology/operators.cpp
+        
         csrc/cuda/morphology/operators.cu
-        csrc/cuda/morphology/backward.cu
+        csrc/cuda/morphology/backward.cu        
 )
+if(SERRON_CUDA)
+    list(APPEND _serron_sources
+            csrc/cuda/morphology/operators.cu
+    )
+endif()
+
+Python_add_library(_C MODULE WITH_SOABI ${_serron_sources})
+
+if(SERRON_CUDA)
+    target_compile_definitions(_C PRIVATE SERRON_WITH_CUDA)
+endif()
 
 # -lineinfo on Debug; full device debug (-G) only when explicitly sanitizing.
 option(CUDA_SANITIZE "Build device code with -G for compute-sanitizer" OFF)
@@ -79,14 +108,14 @@ target_include_directories(_C PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/csrc/compat
         ${TORCH_INCLUDE_DIRS}
         ${Python_INCLUDE_DIRS}
-        ${CUDAToolkit_INCLUDE_DIRS}
 )
 
-target_link_libraries(_C PRIVATE
-        ${TORCH_LIBRARIES}
-        CUDA::cudart
-        CUDA::cublas
-)
+target_link_libraries(_C PRIVATE ${TORCH_LIBRARIES})
+
+if(SERRON_CUDA)
+    target_include_directories(_C PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    target_link_libraries(_C PRIVATE CUDA::cudart CUDA::cublas)
+endif()
 
 if(NOT WIN32)
     set_target_properties(_C PROPERTIES

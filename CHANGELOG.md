@@ -1,0 +1,35 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.1.0] - 2026-07-18
+
+### Added
+
+- CUDA grayscale erosion and dilation kernels, including the shared-memory tiled fast path (#4, #8).
+- Boundary handling shared by both kernels: `REFLECT`, `REPLICATE` and `CONSTANT` (#4).
+- Structuring-element builders (#6).
+- Python API: `erosion`, `dilatation`, `opening`, `closing`, `gradient`, `top_hat` and `black_hat` (#8).
+- Dynamic search directories when loading the compiled `_C` extension.
+
+### Changed
+
+- Development status raised to Pre-Alpha.
+
+### Fixed
+
+- Formatting and typing inconsistencies reported by ruff and mypy.
+
+## [0.0.1] - 2026-07-10
+
+### Added
+
+- Initial scaffolding: build system, operator registration and stubs for the planned alpha feature set (#1, #2).
+
+[Unreleased]: https://github.com/vhrabar/serron/compare/v0.1.1...HEAD
+[0.1.0]: https://github.com/vhrabar/serron/compare/v0.0.1...v0.1.0
+[0.0.1]: https://github.com/vhrabar/serron/releases/tag/v0.0.1
