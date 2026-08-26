@@ -17,7 +17,6 @@ namespace serron {
  */
 at::Tensor erode(const at::Tensor& input, const at::Tensor& kernel, int64_t border);
 
-  
 /**
  * Grayscale dilation (sliding maximum) of @p input by structuring element @p kernel.
  *
@@ -28,8 +27,7 @@ at::Tensor erode(const at::Tensor& input, const at::Tensor& kernel, int64_t bord
  */
 at::Tensor dilate(const at::Tensor& input, const at::Tensor& kernel, int64_t border);
 
-  
-  /**
+/**
  * Grayscale erosion (sliding minimum) of @p input by structuring element @p kernel.
  *
  * @param input   CPU tensor of shape (N, C, H, W), floating dtype.
@@ -39,7 +37,6 @@ at::Tensor dilate(const at::Tensor& input, const at::Tensor& kernel, int64_t bor
  */
 at::Tensor erode_cpu(const at::Tensor& input, const at::Tensor& kernel, int64_t border);
 
-  
 /**
  * Grayscale dilation (sliding maximum) of @p input by structuring element @p kernel.
  *
@@ -49,7 +46,6 @@ at::Tensor erode_cpu(const at::Tensor& input, const at::Tensor& kernel, int64_t 
  * @return        Dilated tensor, same shape and dtype as @p input.
  */
 at::Tensor dilate_cpu(const at::Tensor& input, const at::Tensor& kernel, int64_t border);
-  
 
 /**
  * Backward pass of grayscale erosion.
