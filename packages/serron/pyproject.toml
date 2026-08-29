@@ -52,6 +52,7 @@ cpu = ["torch>=2.12"]
 cu132 = ["torch>=2.12"]
 
 [project.urls]
+homepage = "https://github.com/vhrabar/serron"
 repository = "https://github.com/vhrabar/serron"
 documentation =  "https://github.com/vhrabar/serron/wiki"
 "Bug Tracker" = "https://github.com/vhrabar/serron/issues"
