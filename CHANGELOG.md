@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- CPU backward kernels for `erode`/`dilate`, registered on the `CPU` dispatch key, so `.backward()` now works for CPU
+    tensors: gradients flow into both the input and the structuring element through `erosion`, `dilatation`, the composite
+    ops (`opening`, `closing`, `gradient`, `top_hat`, `black_hat`) and the learnable layers, matching the CUDA path (#28).
+
 ## [0.2.0] - 2026-08-26
 
 ### Added

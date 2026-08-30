@@ -73,7 +73,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py"  = ["F401"]
-"benchmarks/*" = ["E402"]
+"benchmarks/*" = ["E402", "B023"]
 "tests/*"      = ["E402"]
 
 [tool.ruff.lint.isort]

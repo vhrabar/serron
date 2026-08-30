@@ -49,8 +49,8 @@ opened = serron.opening(x, kernel)
 closed = serron.closing(x, kernel)
 
 # Derived operators
-grad = serron.gradient(x, kernel)    # dilate(x) - erode(x)
-white = serron.top_hat(x, kernel)    # x - open(x)
+grad = serron.gradient(x, kernel)  # dilate(x) - erode(x)
+white = serron.top_hat(x, kernel)  # x - open(x)
 black = serron.black_hat(x, kernel)  # close(x) - x
 
 # Control border handling
