@@ -77,6 +77,30 @@ std::tuple<at::Tensor, at::Tensor> erode_backward(const at::Tensor& grad_output,
 std::tuple<at::Tensor, at::Tensor> dilate_backward(const at::Tensor& grad_output, const at::Tensor& input,
                                                    const at::Tensor& kernel, int64_t border);
 
+/**
+ * Backward pass of grayscale erosion (CPU), mirroring @ref erode_backward.
+ *
+ * @param grad_output  Upstream gradient, CPU tensor of shape (N, C, H, W), same dtype as @p input.
+ * @param input        The forward input, shape (N, C, H, W).
+ * @param kernel       The forward structuring element, shape (kH, kW) or (C, kH, kW).
+ * @param border       Boundary mode (serron.enums.BorderMode encoding) used in the forward pass.
+ * @return             Pair (grad_input, grad_kernel) matching the shapes of @p input and @p kernel.
+ */
+std::tuple<at::Tensor, at::Tensor> erode_backward_cpu(const at::Tensor& grad_output, const at::Tensor& input,
+                                                      const at::Tensor& kernel, int64_t border);
+
+/**
+ * Backward pass of grayscale dilation (CPU), mirroring @ref dilate_backward.
+ *
+ * @param grad_output  Upstream gradient, CPU tensor of shape (N, C, H, W), same dtype as @p input.
+ * @param input        The forward input, shape (N, C, H, W).
+ * @param kernel       The forward structuring element, shape (kH, kW) or (C, kH, kW).
+ * @param border       Boundary mode (serron.enums.BorderMode encoding) used in the forward pass.
+ * @return             Pair (grad_input, grad_kernel) matching the shapes of @p input and @p kernel.
+ */
+std::tuple<at::Tensor, at::Tensor> dilate_backward_cpu(const at::Tensor& grad_output, const at::Tensor& input,
+                                                       const at::Tensor& kernel, int64_t border);
+
 } // namespace serron
 
 #endif // SERRON_OPS_H

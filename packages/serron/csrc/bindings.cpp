@@ -15,6 +15,8 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
 TORCH_LIBRARY_IMPL_EXPAND(TORCH_EXTENSION_NAME, CPU, ops) {
     ops.impl("erode", &serron::erode_cpu);
     ops.impl("dilate", &serron::dilate_cpu);
+    ops.impl("erode_backward", &serron::erode_backward_cpu);
+    ops.impl("dilate_backward", &serron::dilate_backward_cpu);
 }
 
 // CUDA implementations

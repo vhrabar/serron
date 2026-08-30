@@ -1,6 +1,7 @@
 #include "ops.h"
 
 #include <cpu/morphology/enums.h>
+#include <cpu/morphology/ops_policy.h>
 #include <cpu/utils/boundaries.h>
 
 #include <ATen/AccumulateType.h>
@@ -13,39 +14,6 @@
 namespace serron {
 
 namespace {
-
-/**
- * Operation policies for the morphology kernels.
- */
-struct ErodeOp {
-    template <typename acc_t>
-    static acc_t neutral() {
-        return static_cast<acc_t>(INFINITY);
-    }
-    template <typename acc_t>
-    static acc_t tap(const acc_t sample, const acc_t se) {
-        return sample - se;
-    }
-    template <typename acc_t>
-    static acc_t reduce(const acc_t acc, const acc_t val) {
-        return val < acc ? val : acc;
-    }
-};
-
-struct DilateOp {
-    template <typename acc_t>
-    static acc_t neutral() {
-        return static_cast<acc_t>(-INFINITY);
-    }
-    template <typename acc_t>
-    static acc_t tap(const acc_t sample, const acc_t se) {
-        return sample + se;
-    }
-    template <typename acc_t>
-    static acc_t reduce(const acc_t acc, const acc_t val) {
-        return val > acc ? val : acc;
-    }
-};
 
 /**
  * Grayscale morphology CPU kernel, one iteration per output element, parallelised over the flattened output with

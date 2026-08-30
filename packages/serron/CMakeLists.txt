@@ -71,13 +71,12 @@ endif()
 set(_serron_sources
         csrc/bindings.cpp
         csrc/cpu/morphology/operators.cpp
-        
-        csrc/cuda/morphology/operators.cu
-        csrc/cuda/morphology/backward.cu        
+        csrc/cpu/morphology/backward.cpp
 )
 if(SERRON_CUDA)
     list(APPEND _serron_sources
             csrc/cuda/morphology/operators.cu
+            csrc/cuda/morphology/backward.cu
     )
 endif()
 
