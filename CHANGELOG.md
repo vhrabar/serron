@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-31
+
 ### Added
 
 - CPU backward kernels for `erode`/`dilate`, registered on the `CPU` dispatch key, so `.backward()` now works for CPU
@@ -67,7 +69,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - Initial scaffolding: build system, operator registration and stubs for the planned alpha feature set (#1, #2).
 
-[Unreleased]: https://github.com/vhrabar/serron/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/vhrabar/serron/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/vhrabar/serron/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/vhrabar/serron/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/vhrabar/serron/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/vhrabar/serron/compare/v0.0.1...v0.1.0
