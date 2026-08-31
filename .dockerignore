@@ -1,0 +1,25 @@
+# VCS / editor
+.git
+.github
+.idea
+.vscode
+
+# Local env & caches
+.venv
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# Build outputs
+build
+packages/*/build
+dist
+wheelhouse
+*.egg-info
+*.so
+
+# Profiler
+*.nsys-rep
+*.ncu-rep

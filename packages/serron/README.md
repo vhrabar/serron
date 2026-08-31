@@ -1,11 +1,11 @@
 # Serron
 
 Mathematical Morphology module for PyTorch (CUDA), providing differentiable operators and learnable network layers.
+
 ## Install
 
 Prebuilt wheels are published for CPython 3.12–3.14 on Linux (x86_64, aarch64) and
-Windows (x86_64). A working CUDA-enabled PyTorch (`torch >= 2.12`) must already
-be installed in the environment.
+Windows (x86_64).
 
 ```bash
 pip install serron
@@ -13,11 +13,8 @@ pip install serron
 
 ## Usage
 
-> **Alpha:** the CUDA kernels are not wired up yet, so the operators below currently
-> raise `NotImplementedError`.
-
 Serron works on standard PyTorch tensors laid out as `(N, C, H, W)` and living on a CUDA
-device.
+or CPU device.
 
 ### Functional operators
 
@@ -34,7 +31,7 @@ x = torch.rand(1, 1, 256, 256, device="cuda")
 kernel = se.disk(3, device="cuda")
 
 eroded = serron.erosion(x, kernel)
-dilated = serron.dilatation(x, kernel)
+dilated = serron.dilation(x, kernel)
 opened = serron.opening(x, kernel)
 closed = serron.closing(x, kernel)
 
@@ -47,7 +44,7 @@ black = serron.black_hat(x, kernel)  # close(x) - x
 eroded_reflect = serron.erosion(x, kernel, border=BorderMode.REFLECT)
 ```
 
-Available operators: `erosion`, `dilatation`, `opening`, `closing`, `gradient`,
+Available operators: `erosion`, `dilation`, `opening`, `closing`, `gradient`,
 `top_hat`, `black_hat`.
 
 ### Structuring elements
@@ -68,11 +65,11 @@ se.from_tensor(my_weights)  # wrap an arbitrary 2-D tensor as a grayscale SE
 
 `BorderMode` controls how out-of-bounds neighbors are handled:
 
-| Mode | Behavior |
-| --- | --- |
+| Mode                   | Behavior                        |
+|------------------------|---------------------------------|
 | `BorderMode.REPLICATE` | Repeat the edge value (default) |
-| `BorderMode.REFLECT` | Mirror across the edge |
-| `BorderMode.CONSTANT` | Pad with a constant |
+| `BorderMode.REFLECT`   | Mirror across the edge          |
+| `BorderMode.CONSTANT`  | Pad with a constant             |
 
 ### Learnable layers
 
@@ -105,11 +102,11 @@ cd serron
 ### Choosing a torch build
 
 `torch` is pulled from a specific wheel index via mutually-exclusive extras. Pick the
-one matching your machine — plain `uv sync` (no extra) falls back to the default
+one matching your machine, plain `uv sync` (no extra) falls back to the default
 CUDA-enabled wheel from PyPI:
 
 ```bash
-uv sync --extra cu132   # CUDA build
+uv sync --extra cu132   # CUDA 13.2 build
 uv sync --extra cpu     # CPU-only build
 ```
 
@@ -122,7 +119,7 @@ uv sync --package serron --no-dev --group build --extra cu132
 uv build --package serron --wheel --no-build-isolation
 ```
 
-On a GPU-less machine, sync the CPU torch build instead, the extension then builds
+On a GPU-less machine, sync the CPU torch build instead; the extension then builds
 C++ only (no `nvcc` required):
 
 ```bash

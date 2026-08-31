@@ -24,7 +24,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check tag against project.version
         id: version
@@ -48,10 +48,10 @@ jobs:
     needs: [verify]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.14"
 
@@ -61,7 +61,7 @@ jobs:
       - name: Build sdist
         run: uv build --package "${PACKAGE}" --sdist --out-dir dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sdist
           path: dist/*.tar.gz
@@ -86,7 +86,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.container }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install CUDA toolkit
         run: |
@@ -98,7 +98,7 @@ jobs:
       - name: Build wheel
         env:
           CUDA_HOME: /usr/local/cuda-13.2
-          MAX_JOBS: "2"
+          CMAKE_BUILD_PARALLEL_LEVEL: "2"
         run: |
           export PATH="/usr/local/cuda-13.2/bin:/opt/python/${{ matrix.python }}/bin:${PATH}"
           python -m pip install --upgrade pip
@@ -118,7 +118,7 @@ jobs:
             --exclude 'libcuda.so*' \
             --exclude 'libnvToolsExt.so*'
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheels-linux-${{ matrix.arch }}-${{ matrix.python }}
           path: dist/*.whl
@@ -132,14 +132,14 @@ jobs:
       matrix:
         python: ["3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
 
       - name: Install CUDA toolkit
-        uses: Jimver/cuda-toolkit@v0.2.35
+        uses: Jimver/cuda-toolkit@v0.2.36
         with:
           cuda: "13.2.0"
           method: local
@@ -150,14 +150,14 @@ jobs:
 
       - name: Build wheel
         env:
-          MAX_JOBS: "2"
+          CMAKE_BUILD_PARALLEL_LEVEL: "2"
         run: |
           python -m pip install --upgrade pip
           python -m pip install --index-url "${env:TORCH_INDEX}" "torch>=2.12"
           python -m pip install scikit-build-core==1.0.2 cmake ninja build
           python -m build --wheel --no-isolation "${env:PKG_DIR}" --outdir dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheels-windows-x86_64-${{ matrix.python }}
           path: dist/*.whl
@@ -168,7 +168,7 @@ jobs:
     needs: [sdist, linux-wheels, windows-wheel]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true

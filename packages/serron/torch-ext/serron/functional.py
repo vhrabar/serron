@@ -28,7 +28,7 @@ def erosion(input_: torch.Tensor, kernel: torch.Tensor, *, border: BorderMode = 
     return result
 
 
-def dilatation(input_: torch.Tensor, kernel: torch.Tensor, *, border: BorderMode = BorderMode.REPLICATE) -> torch.Tensor:
+def dilation(input_: torch.Tensor, kernel: torch.Tensor, *, border: BorderMode = BorderMode.REPLICATE) -> torch.Tensor:
     """
     Grayscale dilation (sliding maximum) of ``input`` by ``kernel``
     :param input_: input tensor
@@ -48,7 +48,7 @@ def opening(input_: torch.Tensor, kernel: torch.Tensor, *, border: BorderMode = 
     :param border: border mode
     :return: top-hat tensor
     """
-    return dilatation(erosion(input_, kernel, border=border), kernel, border=border)
+    return dilation(erosion(input_, kernel, border=border), kernel, border=border)
 
 
 def closing(input_: torch.Tensor, kernel: torch.Tensor, *, border: BorderMode = BorderMode.REPLICATE) -> torch.Tensor:
@@ -59,7 +59,7 @@ def closing(input_: torch.Tensor, kernel: torch.Tensor, *, border: BorderMode = 
     :param border: border mode
     :return: top-hat tensor
     """
-    return erosion(dilatation(input_, kernel, border=border), kernel, border=border)
+    return erosion(dilation(input_, kernel, border=border), kernel, border=border)
 
 
 def gradient(input_: torch.Tensor, kernel: torch.Tensor, *, border: BorderMode = BorderMode.REPLICATE) -> torch.Tensor:
@@ -70,7 +70,7 @@ def gradient(input_: torch.Tensor, kernel: torch.Tensor, *, border: BorderMode =
     :param border: border mode
     :return: top-hat tensor
     """
-    return dilatation(input_, kernel, border=border) - erosion(input_, kernel, border=border)
+    return dilation(input_, kernel, border=border) - erosion(input_, kernel, border=border)
 
 
 def top_hat(input_: torch.Tensor, kernel: torch.Tensor, *, border: BorderMode = BorderMode.REPLICATE) -> torch.Tensor:

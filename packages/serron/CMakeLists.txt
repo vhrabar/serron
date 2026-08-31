@@ -33,9 +33,14 @@ if(SERRON_CUDA)
     set(CMAKE_CUDA_STANDARD 20)
     set(CMAKE_CUDA_STANDARD_REQUIRED ON)
     set(CMAKE_CUDA_SEPARABLE_COMPILATION OFF)
-    set(CMAKE_CUDA_ARCHITECTURES 90 100 120)
-    set(TORCH_CUDA_ARCH_LIST "9.0;10.0;12.0")
-    message(STATUS "serron: building with CUDA backend")
+
+    if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+        set(CMAKE_CUDA_ARCHITECTURES 75-real 80-real 86-real 89-real 90-real 100-real 120-real 120-virtual)
+    endif()
+    if(NOT DEFINED TORCH_CUDA_ARCH_LIST)
+        set(TORCH_CUDA_ARCH_LIST "7.5;8.0;8.6;8.9;9.0;10.0;12.0+PTX")
+    endif()
+    message(STATUS "serron: building with CUDA backend (arch ${CMAKE_CUDA_ARCHITECTURES})")
 else()
     message(STATUS "serron: building C++ only (no CUDA backend)")
 endif()
@@ -71,13 +76,12 @@ endif()
 set(_serron_sources
         csrc/bindings.cpp
         csrc/cpu/morphology/operators.cpp
-        
-        csrc/cuda/morphology/operators.cu
-        csrc/cuda/morphology/backward.cu        
+        csrc/cpu/morphology/backward.cpp
 )
 if(SERRON_CUDA)
     list(APPEND _serron_sources
             csrc/cuda/morphology/operators.cu
+            csrc/cuda/morphology/backward.cu
     )
 endif()
 
@@ -87,10 +91,12 @@ if(SERRON_CUDA)
     target_compile_definitions(_C PRIVATE SERRON_WITH_CUDA)
 endif()
 
+set(SERRON_CUDA_NVCC_THREADS 1 CACHE STRING "nvcc --threads (per-.cu arch parallelism)")
+
 # -lineinfo on Debug; full device debug (-G) only when explicitly sanitizing.
 option(CUDA_SANITIZE "Build device code with -G for compute-sanitizer" OFF)
 target_compile_options(_C PRIVATE
-        $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:--threads=0>
+        $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:--threads=${SERRON_CUDA_NVCC_THREADS}>
         $<$<AND:$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>,$<CONFIG:Debug>>:-lineinfo>
         $<$<AND:$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>,$<CONFIG:Debug>,$<BOOL:${CUDA_SANITIZE}>>:-G>
 )

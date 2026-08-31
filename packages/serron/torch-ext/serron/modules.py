@@ -49,7 +49,7 @@ class Dilation2d(_MorphologyNd):
     """Learnable 2-D dilation layer."""
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return F.dilatation(x, self.weight, border=self.border)
+        return F.dilation(x, self.weight, border=self.border)
 
 
 class Opening2d(_MorphologyNd):

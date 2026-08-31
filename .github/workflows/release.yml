@@ -6,7 +6,6 @@ name: Release
 #   read VERSION from pyproject.toml -> promote CHANGELOG.md's [Unreleased] section
 #   -> commit + tag on main -> publish the release -> sync the promotion back onto dev
 
-
 on:
   push:
     branches: [main]
@@ -27,13 +26,14 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
 
       - name: Read the version from pyproject.toml
         id: version
@@ -108,7 +108,7 @@ jobs:
       - name: Publish the release from CHANGELOG.md
         if: steps.gate.outputs.skip != 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
           TAG: ${{ steps.version.outputs.tag }}
         run: |
@@ -127,7 +127,7 @@ jobs:
       - name: Sync the release commit back to dev
         if: steps.gate.outputs.skip != 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           TAG: ${{ steps.version.outputs.tag }}
         run: |
           set -euo pipefail
