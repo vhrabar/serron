@@ -14,7 +14,7 @@ from tests.conftest import BORDERS, PREFERRED_DEVICE, make_image, make_se, refer
 
 LAYERS = {
     serron.Erosion2d: "erosion",
-    serron.Dilation2d: "dilatation",
+    serron.Dilation2d: "dilation",
     serron.Opening2d: "opening",
     serron.Closing2d: "closing",
 }

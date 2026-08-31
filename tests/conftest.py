@@ -25,7 +25,7 @@ requires_cuda = pytest.mark.skipif(not CUDA_AVAILABLE, reason="requires a CUDA d
 # API surface the parametrised tests iterate over
 # --------------------------------------------------------------------------- #
 
-PRIMITIVES = ["erosion", "dilatation"]
+PRIMITIVES = ["erosion", "dilation"]
 COMPOSITES = ["opening", "closing", "gradient", "top_hat", "black_hat"]
 ALL_OPS = PRIMITIVES + COMPOSITES
 BORDERS = [BorderMode.REFLECT, BorderMode.REPLICATE, BorderMode.CONSTANT]
@@ -136,7 +136,7 @@ def reference(op: str, x: torch.Tensor, kernel: torch.Tensor, border: BorderMode
 
     builders = {
         "erosion": lambda: ero(x),
-        "dilatation": lambda: dil(x),
+        "dilation": lambda: dil(x),
         "opening": lambda: dil(ero(x)),
         "closing": lambda: ero(dil(x)),
         "gradient": lambda: dil(x) - ero(x),

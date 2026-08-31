@@ -16,7 +16,7 @@ from serron.modules import _MorphologyNd
 from tests.conftest import DEVICES
 
 MODULES = [serron.Erosion2d, serron.Dilation2d, serron.Opening2d, serron.Closing2d]
-FUNCTIONALS = ["erosion", "dilatation", "opening", "closing", "gradient", "top_hat", "black_hat"]
+FUNCTIONALS = ["erosion", "dilation", "opening", "closing", "gradient", "top_hat", "black_hat"]
 SE_BUILDERS = ["square", "cross", "disk", "diamond", "from_tensor"]
 
 

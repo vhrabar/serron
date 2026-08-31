@@ -67,7 +67,7 @@ def test_raw_backward_rejects_grad_output_shape_mismatch(rng: torch.Generator) -
         torch.ops.serron.erode_backward(grad_output, x, flat_se(1), 1)
 
 
-@pytest.mark.parametrize("op", ["erosion", "dilatation", "opening", "closing", "gradient", "top_hat", "black_hat"])
+@pytest.mark.parametrize("op", ["erosion", "dilation", "opening", "closing", "gradient", "top_hat", "black_hat"])
 def test_all_ops_share_the_same_guards(op: str, rng: torch.Generator) -> None:
     with pytest.raises(RuntimeError):
         getattr(serron.functional, op)(torch.randn(5, 5, device=PREFERRED_DEVICE), flat_se(1)[0])

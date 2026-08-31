@@ -96,7 +96,7 @@ def _run_case(op: str, n: int, c: int, h: int, w: int, k: int) -> str:
     else:
 
         def serron_op() -> torch.Tensor:
-            return serron.dilatation(x, se_flat, border=BorderMode.CONSTANT)
+            return serron.dilation(x, se_flat, border=BorderMode.CONSTANT)
 
         def torch_op() -> torch.Tensor:
             return F.max_pool2d(x, kernel_size=k, stride=1, padding=pad)

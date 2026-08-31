@@ -55,7 +55,7 @@ def test_output_shape_preserved(op: str, rng: torch.Generator) -> None:
 
 
 @pytest.mark.parametrize("ksize", [2, 4], ids=["k2", "k4"])
-@pytest.mark.parametrize("op", ["erosion", "dilatation"])
+@pytest.mark.parametrize("op", ["erosion", "dilation"])
 def test_even_kernel_matches_reference(op: str, ksize: int, rng: torch.Generator) -> None:
     """Even-sized structuring elements anchor at ``k // 2``, and the reference
     anchors them the same way."""
@@ -67,7 +67,7 @@ def test_even_kernel_matches_reference(op: str, ksize: int, rng: torch.Generator
     torch.testing.assert_close(out, expected)
 
 
-@pytest.mark.parametrize("op", ["erosion", "dilatation"])
+@pytest.mark.parametrize("op", ["erosion", "dilation"])
 def test_kernel_larger_than_image(op: str, rng: torch.Generator) -> None:
     x = make_image(rng, (1, 1, 3, 3))
     kernel = flat_se(1, 5)
@@ -100,7 +100,7 @@ def test_float32_matches_reference(rng: torch.Generator) -> None:
 
 
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16], ids=["fp16", "bf16"])
-@pytest.mark.parametrize("op", ["erosion", "dilatation"])
+@pytest.mark.parametrize("op", ["erosion", "dilation"])
 def test_low_precision_runs_and_tracks_fp32(op: str, dtype: torch.dtype, rng: torch.Generator) -> None:
     x = make_image(rng, (2, 3, 16, 16), dtype=dtype)
     kernel = flat_se(3, 3, dtype=dtype)
@@ -128,12 +128,12 @@ def test_low_precision_runs_and_tracks_fp32(op: str, dtype: torch.dtype, rng: to
 def test_empty_tensors(shape: tuple[int, int, int, int], rng: torch.Generator) -> None:
     x = make_image(rng, shape)
     kernel = flat_se(shape[1], 3)
-    for op in ("erosion", "dilatation", "opening", "closing"):
+    for op in ("erosion", "dilation", "opening", "closing"):
         out = getattr(serron.functional, op)(x, kernel)
         assert out.shape == x.shape
 
 
-@pytest.mark.parametrize("op", ["erosion", "dilatation"])
+@pytest.mark.parametrize("op", ["erosion", "dilation"])
 def test_identity_1x1_kernel(op: str, rng: torch.Generator) -> None:
     """A 1x1 flat SE only ever sees the centre tap, so the image comes back untouched."""
     x = make_image(rng)
@@ -147,7 +147,7 @@ def test_zero_kernel_is_translation_invariant() -> None:
     kernel = flat_se(1, 3)
     for op in ALL_OPS:
         got = getattr(serron.functional, op)(x, kernel)
-        want = x if op in ("erosion", "dilatation", "opening", "closing") else torch.zeros_like(x)
+        want = x if op in ("erosion", "dilation", "opening", "closing") else torch.zeros_like(x)
         _close(got, want)
 
 
@@ -158,11 +158,11 @@ def test_zero_kernel_is_translation_invariant() -> None:
 
 @pytest.mark.parametrize("border", BORDERS)
 def test_erosion_dilation_duality(border: BorderMode, rng: torch.Generator) -> None:
-    """erosion(x, k) == -dilatation(-x, k) for the additive (correlation) form."""
+    """erosion(x, k) == -dilation(-x, k) for the additive (correlation) form."""
     x = make_image(rng)
     kernel = make_se(rng, x.shape[1])
     ero = serron.functional.erosion(x, kernel, border=border)
-    dil = serron.functional.dilatation(-x, kernel, border=border)
+    dil = serron.functional.dilation(-x, kernel, border=border)
     _close(ero, -dil)
 
 
@@ -173,7 +173,7 @@ def test_extensivity_with_flat_se(border: BorderMode, rng: torch.Generator) -> N
     kernel = flat_se(x.shape[1])
     fn = serron.functional
     assert (fn.erosion(x, kernel, border=border) <= x + 1e-12).all()
-    assert (fn.dilatation(x, kernel, border=border) >= x - 1e-12).all()
+    assert (fn.dilation(x, kernel, border=border) >= x - 1e-12).all()
     assert (fn.opening(x, kernel, border=border) <= x + 1e-12).all()
     assert (fn.closing(x, kernel, border=border) >= x - 1e-12).all()
 
@@ -187,7 +187,7 @@ def test_opening_closing_are_idempotent(op: str, rng: torch.Generator) -> None:
     _close(twice, once)
 
 
-@pytest.mark.parametrize("op", ["erosion", "dilatation", "opening", "closing"])
+@pytest.mark.parametrize("op", ["erosion", "dilation", "opening", "closing"])
 def test_monotonic_increasing(op: str, rng: torch.Generator) -> None:
     """All four operators are increasing: x <= y  =>  op(x) <= op(y)."""
     x = make_image(rng)
@@ -202,7 +202,7 @@ def test_gradient_identities(rng: torch.Generator) -> None:
     x = make_image(rng)
     kernel = make_se(rng, x.shape[1])
     fn = serron.functional
-    _close(fn.gradient(x, kernel), fn.dilatation(x, kernel) - fn.erosion(x, kernel))
+    _close(fn.gradient(x, kernel), fn.dilation(x, kernel) - fn.erosion(x, kernel))
     _close(fn.top_hat(x, kernel), x - fn.opening(x, kernel))
     _close(fn.black_hat(x, kernel), fn.closing(x, kernel) - x)
     assert (fn.gradient(x, kernel) >= -1e-12).all()
@@ -220,7 +220,7 @@ def test_builder_se_matches_reference(shape: str, rng: torch.Generator) -> None:
     x = make_image(rng, (1, 1, 16, 16))
     builder = {"square": se.square(5), "cross": se.cross(5), "disk": se.disk(2), "diamond": se.diamond(2)}[shape]
     kernel = builder.to(x).unsqueeze(0)  # (1, kh, kw), float64
-    for op in ("erosion", "dilatation"):
+    for op in ("erosion", "dilation"):
         out = getattr(serron.functional, op)(x, kernel)
         torch.testing.assert_close(out, reference(op, x, kernel))
 

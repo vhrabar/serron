@@ -30,7 +30,7 @@ x = torch.rand(1, 1, 256, 256, device="cuda")
 kernel = se.disk(3, device="cuda")
 
 eroded = serron.erosion(x, kernel)
-dilated = serron.dilatation(x, kernel)
+dilated = serron.dilation(x, kernel)
 opened = serron.opening(x, kernel)
 closed = serron.closing(x, kernel)
 
@@ -43,7 +43,7 @@ black = serron.black_hat(x, kernel)  # close(x) - x
 eroded_reflect = serron.erosion(x, kernel, border=BorderMode.REFLECT)
 ```
 
-Available operators: `erosion`, `dilatation`, `opening`, `closing`, `gradient`,
+Available operators: `erosion`, `dilation`, `opening`, `closing`, `gradient`,
 `top_hat`, `black_hat`.
 
 ### Structuring elements

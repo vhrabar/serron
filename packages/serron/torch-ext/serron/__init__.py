@@ -12,7 +12,7 @@ from .enums import BorderMode, Operation
 from .functional import (
     black_hat,
     closing,
-    dilatation,
+    dilation,
     erosion,
     gradient,
     opening,
@@ -35,7 +35,7 @@ __all__ = [
     "__version__",
     "black_hat",
     "closing",
-    "dilatation",
+    "dilation",
     "erosion",
     "functional",
     "gradient",

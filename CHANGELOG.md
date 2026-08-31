@@ -9,7 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Added
 
 - CPU backward kernels for `erode`/`dilate`, registered on the `CPU` dispatch key, so `.backward()` now works for CPU
-    tensors: gradients flow into both the input and the structuring element through `erosion`, `dilatation`, the composite
+    tensors: gradients flow into both the input and the structuring element through `erosion`, `dilation`, the composite
     ops (`opening`, `closing`, `gradient`, `top_hat`, `black_hat`) and the learnable layers, matching the CUDA path (#28).
 
 ## [0.2.0] - 2026-08-26
@@ -17,7 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Added
 
 - CUDA backward kernels for `erode`/`dilate`, wired through new `_ErodeFunction`/`_DilateFunction` autograd bindings, 
-    so gradients now flow through `erosion`, `dilatation`, and the composite ops (`opening`, `closing`, `gradient`, `top_hat`,
+    so gradients now flow through `erosion`, `dilation`, and the composite ops (`opening`, `closing`, `gradient`, `top_hat`,
     `black_hat`) into both the input and the structuring element, including the learnable layers (`Erosion2d`, `Dilation2d`,
     `Opening2d`, `Closing2d`), which can now be optimized E2E (#13, #15). CUDA only for now; CPU tensors still raise on `.backward()`.
 
@@ -37,7 +37,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - CUDA grayscale erosion and dilation kernels, including the shared-memory tiled fast path (#4, #8).
 - Boundary handling shared by both kernels: `REFLECT`, `REPLICATE` and `CONSTANT` (#4).
 - Structuring-element builders (#6).
-- Python API: `erosion`, `dilatation`, `opening`, `closing`, `gradient`, `top_hat` and `black_hat` (#8).
+- Python API: `erosion`, `dilation`, `opening`, `closing`, `gradient`, `top_hat` and `black_hat` (#8).
 - Dynamic search directories when loading the compiled `_C` extension.
 
 ### Changed

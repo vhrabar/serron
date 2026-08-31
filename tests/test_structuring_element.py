@@ -143,7 +143,7 @@ def test_flat_se_behaves_like_masked_min_max() -> None:
     members = _members(kernel[0])
 
     ero = serron.functional.erosion(x, kernel, border=BorderMode.REPLICATE)
-    dil = serron.functional.dilatation(x, kernel, border=BorderMode.REPLICATE)
+    dil = serron.functional.dilation(x, kernel, border=BorderMode.REPLICATE)
 
     # Reference: masked min/max over the disk footprint, REPLICATE padding.
     xp = torch.nn.functional.pad(x, (2, 2, 2, 2), mode="replicate")
