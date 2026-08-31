@@ -11,6 +11,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - CPU backward kernels for `erode`/`dilate`, registered on the `CPU` dispatch key, so `.backward()` now works for CPU
     tensors: gradients flow into both the input and the structuring element through `erosion`, `dilation`, the composite
     ops (`opening`, `closing`, `gradient`, `top_hat`, `black_hat`) and the learnable layers, matching the CUDA path (#28).
+- Autocast support for `erode`/`dilate` through dedicated `Autocast` and `AutocastCPU` dispatch implementations, so
+    `erosion`, `dilation`, the composite ops and the learnable layers run correctly inside `torch.autocast` regions: the
+    image and the structuring element are cast to the autocast execution dtype before the kernel runs.
+- Published container image `ghcr.io/vhrabar/serron`, built and pushed to GHCR on every release tag, bundling both the testing and benchmarking
+    suites for easier reproducibility.
+
+### Changed
+
+- Renamed the dilation operator from `dilatation` to `dilation`, matching the spelling used across the ecosystem. This
+    affects `serron.dilation`, `serron.functional.dilation` and the internal call sites of `Dilation2d`, `opening`,
+    `closing` and `gradient`. **Breaking:** the old `dilatation` / `serron.functional.dilatation` name is no longer
+    exported.
+- `erosion` and `dilation` (and the `_ErodeFunction`/`_DilateFunction` autograd bindings) now promote a mismatched
+    image/structuring-element dtype to their common type via `torch.promote_types` instead of raising; the raw
+    `torch.ops.serron.*` operators still require both tensors to share a dtype.
 
 ## [0.2.0] - 2026-08-26
 
@@ -25,8 +40,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
-- CPU backend for `erode` and `dilate`, registered on the `CPU` dispatch key so CPU tensors no longer require a CUDA build (#17).
-- CPU-only and CUDA 13.x build paths in the installation instructions (#17).
 - CPU backend for `erode` and `dilate`, registered on the `CPU` dispatch key so CPU tensors no longer require a CUDA build (#17).
 - CPU-only and CUDA 13.x build paths in the installation instructions (#17).
 
