@@ -29,10 +29,16 @@ def test_rejects_bad_kernel_rank(rng: torch.Generator) -> None:
         serron.erosion(x, torch.zeros(3, dtype=torch.float64, device=PREFERRED_DEVICE))
 
 
-def test_rejects_dtype_mismatch(rng: torch.Generator) -> None:
+def test_promotes_dtype_mismatch(rng: torch.Generator) -> None:
+    x = make_image(rng, (1, 1, 6, 6), dtype=torch.float32)
+    out = serron.erosion(x, flat_se(1, dtype=torch.float64))
+    assert out.dtype == torch.float64
+
+
+def test_raw_op_rejects_dtype_mismatch(rng: torch.Generator) -> None:
     x = make_image(rng, (1, 1, 6, 6), dtype=torch.float32)
     with pytest.raises(RuntimeError, match="share a dtype"):
-        serron.erosion(x, flat_se(1, dtype=torch.float64))
+        torch.ops.serron.erode(x, flat_se(1, dtype=torch.float64), 0)
 
 
 def test_rejects_kernel_channel_mismatch(rng: torch.Generator) -> None:
