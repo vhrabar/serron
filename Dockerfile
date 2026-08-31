@@ -44,7 +44,9 @@ COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --extra cu132 --no-editable
 
-RUN useradd --create-home --uid 1000 app && chown -R app:app /app /opt/venv
+RUN userdel --remove ubuntu 2>/dev/null || true \
+    && useradd --create-home --uid 1000 app \
+    && chown -R app:app /app /opt/venv
 USER app
 
 ENTRYPOINT ["uv", "run", "--no-sync"]

@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- Release-wheel builds no longer fail on a `scikit-build-core` version mismatch: the CI
+    workflow installs the exact pin from `packages/serron/pyproject.toml`
+    (`[build-system].requires`) instead of a stale hardcoded one. As a result, 0.3.0 shipped
+    no prebuilt wheels.
+- The `ghcr.io/vhrabar/serron` container image builds again: the `ubuntu:26.04` CUDA base
+    ships a UID-1000 user, which aborted `useradd --uid 1000 app` during the 0.3.0 image build.
+
 ## [0.3.0] - 2026-08-31
 
 ### Added

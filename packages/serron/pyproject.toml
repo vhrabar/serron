@@ -1,6 +1,6 @@
 [project]
 name = "serron"
-version = "0.3.0"
+version = "0.3.1"
 description = "Mathematical Morphology module for PyTorch (CUDA), providing differentiable operators and learnable network layers."
 readme = "README.md"
 requires-python = ">=3.12"
