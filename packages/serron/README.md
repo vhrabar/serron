@@ -1,6 +1,7 @@
 # Serron
 
 Mathematical Morphology module for PyTorch (CUDA), providing differentiable operators and learnable network layers.
+
 ## Install
 
 Prebuilt wheels are published for CPython 3.12–3.14 on Linux (x86_64, aarch64) and

@@ -1,14 +1,27 @@
 [project]
 name = "serron"
-version = "0.2.0"
-description = " Mathematical Morphology module for PyTorch (CUDA), providing differentiable operators and learnable network layers."
+version = "0.3.0"
+description = "Mathematical Morphology module for PyTorch (CUDA), providing differentiable operators and learnable network layers."
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [
     { name = "Vedran Hrabar", email = "vedran.hrabar@outlook.com" },
 ]
-license = { text = "MIT" }
-keywords = ["cuda", "pytorch", "morphology",]
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = [
+    "cuda",
+    "gpu",
+    "pytorch",
+    "morphology",
+    "mathematical-morphology",
+    "image-processing",
+    "computer-vision",
+    "erosion",
+    "dilation",
+    "differentiable",
+    "deep-learning",
+]
 
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -19,8 +32,6 @@ classifiers = [
 
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
-
-    "License :: OSI Approved :: MIT License",
 
     "Operating System :: POSIX :: Linux",
     "Operating System :: Microsoft :: Windows",
@@ -52,9 +63,10 @@ cpu = ["torch>=2.12"]
 cu132 = ["torch>=2.12"]
 
 [project.urls]
-homepage = "https://github.com/vhrabar/serron"
-repository = "https://github.com/vhrabar/serron"
-documentation =  "https://github.com/vhrabar/serron/wiki"
+Homepage = "https://github.com/vhrabar/serron"
+Source = "https://github.com/vhrabar/serron"
+Documentation =  "https://github.com/vhrabar/serron/wiki"
+Changelog = "https://github.com/vhrabar/serron/blob/main/CHANGELOG.md"
 "Bug Tracker" = "https://github.com/vhrabar/serron/issues"
 
 
