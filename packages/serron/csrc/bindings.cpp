@@ -33,8 +33,8 @@ TORCH_LIBRARY_IMPL_EXPAND(TORCH_EXTENSION_NAME, CUDA, ops) {
 namespace {
 
 at::ScalarType morphology_exec_type(const at::Tensor& input, const at::Tensor& kernel, c10::DeviceType device_type) {
-    return at::autocast::promote_type(at::autocast::get_lower_precision_fp_from_device_type(device_type), device_type, input,
-                                      kernel);
+    return at::autocast::promote_type(at::autocast::get_lower_precision_fp_from_device_type(device_type), device_type,
+                                      input, kernel);
 }
 
 at::Tensor erode_autocast(const at::Tensor& input, const at::Tensor& kernel, int64_t border) {
