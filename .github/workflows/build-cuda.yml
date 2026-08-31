@@ -92,4 +92,4 @@ jobs:
       - name: Compile CUDA extension
         run: uv build --package serron --wheel --no-build-isolation
         env:
-          MAX_JOBS: "2"
+          CMAKE_BUILD_PARALLEL_LEVEL: "2"

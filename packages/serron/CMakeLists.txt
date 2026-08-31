@@ -91,10 +91,12 @@ if(SERRON_CUDA)
     target_compile_definitions(_C PRIVATE SERRON_WITH_CUDA)
 endif()
 
+set(SERRON_CUDA_NVCC_THREADS 1 CACHE STRING "nvcc --threads (per-.cu arch parallelism)")
+
 # -lineinfo on Debug; full device debug (-G) only when explicitly sanitizing.
 option(CUDA_SANITIZE "Build device code with -G for compute-sanitizer" OFF)
 target_compile_options(_C PRIVATE
-        $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:--threads=0>
+        $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:--threads=${SERRON_CUDA_NVCC_THREADS}>
         $<$<AND:$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>,$<CONFIG:Debug>>:-lineinfo>
         $<$<AND:$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>,$<CONFIG:Debug>,$<BOOL:${CUDA_SANITIZE}>>:-G>
 )
