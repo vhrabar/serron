@@ -1120,7 +1120,7 @@ wheels = [
 
 [[package]]
 name = "serron"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "packages/serron" }
 dependencies = [
     { name = "torch", version = "2.13.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "(python_full_version < '3.15' and sys_platform == 'darwin' and extra == 'extra-6-serron-cpu') or (python_full_version >= '3.15' and extra == 'extra-6-serron-cpu' and extra == 'extra-6-serron-cu132') or (sys_platform != 'darwin' and extra == 'extra-6-serron-cpu' and extra == 'extra-6-serron-cu132')" },
