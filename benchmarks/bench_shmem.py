@@ -9,6 +9,8 @@ import os
 import subprocess
 import sys
 
+from benchmarks._table import markdown_table
+
 # (batch, channels, height, width), kernel size
 CASES = [
     (1, 1, 512, 512, 3),
@@ -19,6 +21,8 @@ CASES = [
 ]
 _ITERS = 50
 _WARMUP = 5
+_COLUMNS = ("shape", "k", "global (ms)", "shared (ms)", "speedup")
+_ALIGNS = "lrrrr"
 
 
 def _run_worker() -> None:
@@ -40,7 +44,7 @@ def _run_worker() -> None:
         for _ in range(_ITERS):
             serron.erosion(x, se)
         torch.cuda.synchronize()
-        results[f"{n}x{c}x{h}x{w}_k{k}"] = (time.perf_counter() - start) / _ITERS
+        results[f"{n}x{c}x{h}x{w},{k}"] = (time.perf_counter() - start) / _ITERS
     print(json.dumps(results))
 
 
@@ -64,7 +68,7 @@ def _time_variant(force_global: bool) -> dict[str, float]:
 
 
 def main() -> None:
-    """Time both kernel variants and print a per-case speedup table."""
+    """Time both kernel variants and print a per-case speedup table, as markdown."""
     import torch
 
     if not torch.cuda.is_available():
@@ -74,15 +78,16 @@ def main() -> None:
     shared = _time_variant(force_global=False)
     glob = _time_variant(force_global=True)
 
-    dev = torch.cuda.get_device_name(0)
-    print(f"\nerosion forward, float32, {_ITERS} iters on {dev}\n")
-    header = f"{'case':<22}{'global (ms)':>14}{'shared (ms)':>14}{'speedup':>10}"
-    print(header)
-    print("-" * len(header))
+    rows = []
     for case in shared:
+        shape, k = case.split(",")
         g = glob[case] * 1e3
         s = shared[case] * 1e3
-        print(f"{case:<22}{g:>14.3f}{s:>14.3f}{g / s:>9.2f}x")
+        rows.append([shape, k, f"{g:.3f}", f"{s:.3f}", f"{g / s:.2f}x"])
+
+    dev = torch.cuda.get_device_name(0)
+    print(f"\nErosion forward, float32, {_ITERS} iters on {dev}.\n")
+    print(markdown_table(_COLUMNS, rows, _ALIGNS))
 
 
 if __name__ == "__main__":
