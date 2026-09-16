@@ -8,4 +8,7 @@ constexpr int THREADS = 256;
 constexpr int TILE_X = 32;
 constexpr int TILE_Y = 8;
 
+/// Threads per block for the separable morphology line passes.
+constexpr int LINE_TILE = 256;
+
 #endif // SERRON_DECLARATIONS_CUH

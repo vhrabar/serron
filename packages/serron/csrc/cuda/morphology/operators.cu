@@ -2,6 +2,7 @@
 
 #include <cuda/morphology/enums.cuh>
 #include <cuda/morphology/ops_policy.cuh>
+#include <cuda/morphology/separable.cuh>
 #include <cuda/utils/boundaries.cuh>
 #include <cuda/utils/declarations.cuh>
 
@@ -179,17 +180,127 @@ __global__ void morphology_tiled_kernel(const scalar_t* __restrict__ input, cons
     output[nc * H * W + out_y * W + out_x] = static_cast<scalar_t>(acc);
 }
 
+/// Which axis a separable line pass reduces over.
+enum class LineAxis : int { kRow = 0, kCol = 1 };
+
+/**
+ * Separable line-reduction kernel: one thread per output pixel, block covers a
+ * contiguous run of one line plus its halo of @c k-1 samples in shared memory.
+ *
+ *
+ * @tparam scalar_t  Element type; the reduction accumulates in at::acc_type<scalar_t>.
+ * @tparam Op        Operation policy (@ref ErodeOp or @ref DilateOp); only @c neutral and
+ * @c reduce are used.
+ * @tparam Axis      @ref LineAxis::kRow reduces along W (contiguous); @ref LineAxis::kCol
+ * along H (stride W).
+ * @param input      Input image, contiguous (N, C, H, W).
+ * @param output     Output image, contiguous (N, C, H, W); written in full.
+ * @param N          Batch size.
+ * @param C          Channel count.
+ * @param H          Input/output height.
+ * @param W          Input/output width.
+ * @param k          Window length along @p Axis (kW for kRow, kH for kCol).
+ * @param border     Boundary mode (@ref BorderMode) for out-of-image reads.
+ */
+template <typename scalar_t, typename Op, LineAxis Axis>
+__global__ void morphology_line_kernel(const scalar_t* __restrict__ input, scalar_t* __restrict__ output,
+                                       const int64_t N, const int64_t C, const int64_t H, const int64_t W,
+                                       const int64_t k, const BorderMode border) {
+    using acc_t = at::acc_type<scalar_t, true>;
+
+    const int64_t line_len = (Axis == LineAxis::kRow) ? W : H;
+    const int64_t anchor = k / 2;
+    const int64_t tile_len = LINE_TILE + k - 1;
+
+    extern __shared__ __align__(sizeof(double)) unsigned char smem_raw[];
+    auto* s_line = reinterpret_cast<scalar_t*>(smem_raw);
+
+    const int64_t line = blockIdx.y;
+    const int64_t nc = blockIdx.z;
+    const scalar_t* input_nc = input + nc * H * W;
+    scalar_t* output_nc = output + nc * H * W;
+
+    const int64_t tile0 = static_cast<int64_t>(blockIdx.x) * LINE_TILE;
+    const auto neutral = static_cast<scalar_t>(Op::template neutral<acc_t>());
+
+    for (int64_t t = threadIdx.x; t < tile_len; t += LINE_TILE) {
+        int64_t pos = tile0 + t - anchor;
+        const bool valid = resolve_coord(pos, line_len, border);
+        scalar_t v = neutral;
+        if (valid) {
+            if constexpr (Axis == LineAxis::kRow) {
+                v = input_nc[line * W + pos];
+            } else {
+                v = input_nc[pos * W + line];
+            }
+        }
+        s_line[t] = v;
+    }
+    __syncthreads();
+
+    const int64_t out_pos = tile0 + threadIdx.x;
+    if (out_pos >= line_len)
+        return;
+
+    acc_t acc = Op::template neutral<acc_t>();
+    for (int64_t t = 0; t < k; ++t) {
+        acc = Op::reduce(acc, static_cast<acc_t>(s_line[threadIdx.x + t]));
+    }
+
+    if constexpr (Axis == LineAxis::kRow) {
+        output_nc[line * W + out_pos] = static_cast<scalar_t>(acc);
+    } else {
+        output_nc[out_pos * W + line] = static_cast<scalar_t>(acc);
+    }
+}
+
+/**
+ * Chains the row pass (@p input -> @p scratch) into the column pass (@p scratch ->
+ * @p output). Requires the structuring element to be flat and axis-separable.
+ *
+ * @param input    Input image, contiguous (N, C, H, W).
+ * @param scratch  Intermediate buffer, same shape/dtype as @p input; holds the row-pass result.
+ * @param output   Output image, contiguous (N, C, H, W).
+ * @param N        Batch size.
+ * @param C        Channel count.
+ * @param H        Input/output height.
+ * @param W        Input/output width.
+ * @param kH       Structuring-element height (window length for the column pass).
+ * @param kW       Structuring-element width (window length for the row pass).
+ * @param border   Boundary mode (@ref BorderMode) for out-of-image reads.
+ * @param stream   CUDA stream both passes are launched on.
+ */
+template <typename scalar_t, typename Op>
+void launch_morphology_separable(const scalar_t* input, scalar_t* scratch, scalar_t* output, int64_t N, int64_t C,
+                                 int64_t H, int64_t W, int64_t kH, int64_t kW, BorderMode border, cudaStream_t stream) {
+    const dim3 block(LINE_TILE);
+
+    const size_t smem_row = static_cast<size_t>(LINE_TILE + kW - 1) * sizeof(scalar_t);
+    const dim3 grid_row(static_cast<unsigned int>((W + LINE_TILE - 1) / LINE_TILE), static_cast<unsigned int>(H),
+                        static_cast<unsigned int>(N * C));
+    morphology_line_kernel<scalar_t, Op, LineAxis::kRow>
+        <<<grid_row, block, smem_row, stream>>>(input, scratch, N, C, H, W, kW, border);
+
+    const size_t smem_col = static_cast<size_t>(LINE_TILE + kH - 1) * sizeof(scalar_t);
+    const dim3 grid_col(static_cast<unsigned int>((H + LINE_TILE - 1) / LINE_TILE), static_cast<unsigned int>(W),
+                        static_cast<unsigned int>(N * C));
+    morphology_line_kernel<scalar_t, Op, LineAxis::kCol>
+        <<<grid_col, block, smem_col, stream>>>(scratch, output, N, C, H, W, kH, border);
+}
+
 /**
  * Launch the morphology forward pass on @p stream.
  *
- * Uses the fast SMEM tiled kernel when its halo tile plus the structuring element
- * fits in the device's per-block dynamic shared-memory budget, otherwise falls back to
- * the slower GMEM kernel.
  */
 template <typename scalar_t, typename Op>
-void launch_morphology(const scalar_t* input, const scalar_t* kernel, scalar_t* output, int64_t N, int64_t C, int64_t H,
-                       int64_t W, int64_t kH, int64_t kW, int64_t kernel_channel_stride, BorderMode border,
-                       cudaStream_t stream) {
+void launch_morphology(const scalar_t* input, const scalar_t* kernel, scalar_t* output, scalar_t* scratch,
+                       bool use_separable, int64_t N, int64_t C, int64_t H, int64_t W, int64_t kH, int64_t kW,
+                       int64_t kernel_channel_stride, BorderMode border, cudaStream_t stream) {
+    if (use_separable) {
+        launch_morphology_separable<scalar_t, Op>(input, scratch, output, N, C, H, W, kH, kW, border, stream);
+        return;
+    }
+
     const int64_t tile_w = TILE_X + kW - 1;
     const int64_t tile_h = TILE_Y + kH - 1;
     const size_t smem = (static_cast<size_t>(tile_h * tile_w) + static_cast<size_t>(kH * kW)) * sizeof(scalar_t);
@@ -261,22 +372,29 @@ at::Tensor morphology_impl(const at::Tensor& input, const at::Tensor& kernel, in
     if (output.numel() == 0)
         return output;
 
+    const bool use_separable = use_separable_path(kernel_c, kH, kW);
+    at::Tensor scratch;
+    if (use_separable) {
+        scratch = at::empty_like(input_c);
+    }
+
     const c10::cuda::CUDAGuard device_guard(input_c.device());
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
     const auto border_mode = static_cast<BorderMode>(border);
 
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half, at::ScalarType::BFloat16, input_c.scalar_type(), "serron_morphology", [&] {
+            scalar_t* scratch_ptr = use_separable ? scratch.data_ptr<scalar_t>() : nullptr;
             switch (op) {
             case MorphOp::kErode:
                 launch_morphology<scalar_t, ErodeOp>(input_c.data_ptr<scalar_t>(), kernel_c.data_ptr<scalar_t>(),
-                                                     output.data_ptr<scalar_t>(), N, C, H, W, kH, kW,
-                                                     kernel_channel_stride, border_mode, stream);
+                                                     output.data_ptr<scalar_t>(), scratch_ptr, use_separable, N, C, H,
+                                                     W, kH, kW, kernel_channel_stride, border_mode, stream);
                 break;
             case MorphOp::kDilate:
                 launch_morphology<scalar_t, DilateOp>(input_c.data_ptr<scalar_t>(), kernel_c.data_ptr<scalar_t>(),
-                                                      output.data_ptr<scalar_t>(), N, C, H, W, kH, kW,
-                                                      kernel_channel_stride, border_mode, stream);
+                                                      output.data_ptr<scalar_t>(), scratch_ptr, use_separable, N, C, H,
+                                                      W, kH, kW, kernel_channel_stride, border_mode, stream);
                 break;
             }
         });
