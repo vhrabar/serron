@@ -6,7 +6,6 @@
 
 ### Benchmarks
 
-```markdown
 | test                                | params                       | min (ms) | mean (ms) | median (ms) | stddev (ms) | rounds |    ops/s |
 | ----------------------------------- | ---------------------------- | -------: | --------: | ----------: | ----------: | -----: | -------: |
 | test_forward_throughput             | erosion-1x1x256x256-k3       |    0.011 |     0.014 |       0.013 |       0.008 |   3628 | 70,358.1 |
@@ -103,11 +102,9 @@
 | test_layer_training_step_throughput | Dilation2d                   |    2.030 |     2.054 |       2.049 |       0.022 |    486 |    486.9 |
 | test_layer_training_step_throughput | Opening2d                    |    5.572 |    18.057 |      20.692 |       4.945 |    185 |     55.4 |
 | test_layer_training_step_throughput | Closing2d                    |    5.699 |    18.063 |      20.773 |       4.961 |    185 |     55.4 |
-```
 
 
 ### Against PyTorch, SciPy & Kornia
-```markdown
 | op       | shape        |   k | serron (ms) | torch (ms) | vs torch | scipy (ms) | vs scipy | kornia (ms) | vs kornia | cupy (ms) | vs cupy |
 | -------- | ------------ | --: | ----------: | ---------: | -------: | ---------: | -------: | ----------: | --------: | --------: | ------: |
 | erosion  | 1x1x512x512  |   3 |       0.011 |      0.012 |    1.09x |      3.853 |  361.75x |       0.061 |     5.68x |     0.034 |   3.16x |
@@ -129,7 +126,6 @@
 | dilation | 8x3x512x512  |  63 |       0.585 |     18.644 |   31.85x |     86.819 |  148.32x |         OOM |         - |     4.766 |   8.14x |
 | dilation | 8x3x512x512  | 127 |       0.734 |     70.262 |   95.79x |     86.006 |  117.25x |         OOM |         - |     9.449 |  12.88x |
 
-```
 
 ## NVIDIA B200 SXM6 &
 
