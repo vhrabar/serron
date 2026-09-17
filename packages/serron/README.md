@@ -91,6 +91,57 @@ y.sum().backward()  # gradients flow into layer.weight
 
 Available layers: `Erosion2d`, `Dilation2d`, `Opening2d`, `Closing2d`.
 
+## Implementation
+
+Every operator picks one of a few kernels at call time. The structuring element and the
+device's shared memory decide which one.
+
+### Which path runs
+
+
+
+| Path                          | Runs when                                                     | Cost per output           |
+|-------------------------------|---------------------------------------------------------------|---------------------------|
+| Separable van Herk–Gil–Werman | Flat SE and `max(kH, kW) >= SERRON_SEPARABLE_MIN_K`           | O(1) in the window length |
+| Tiled 2-D                     | Otherwise, when the halo tile and the SE fit in shared memory | O(kH × kW)                |
+| Element-wise                  | Otherwise; reads through global memory (CUDA only)            | O(kH × kW)                |
+
+`SERRON_SEPARABLE_MIN_K` is the window length where the separable path takes over. It
+defaults to `20` and accepts any positive integer, it was chosen as a borderline where the 
+separable path beats the tiled 2-D path.
+
+### The separable path
+
+Splitting a flat `kH × kW` window into a `1 × kW` row pass and a `kH × 1` column pass
+already drops the per-pixel work from `kH × kW` to `kH + kW`, and the Van Herk–Gil–Werman algorithm 
+drops it further to a constant three operations per ouput, no matter the sequence length.
+
+On CUDA both scans sit in shared memory. A chunk at least a warp wide gets a warp to
+itself and the lanes cooperate through shuffles; anything shorter gets a single thread.
+On CPU the lines go through `at::parallel_for`.
+
+### Backward
+
+Backward needs to know where the winning sample was, not just what it was, so the two
+scans don't help. It still splits on the same condition: a separable row and column
+argreduce for a flat SE at or above the threshold, and a direct recompute of the winning
+tap otherwise.
+
+## Benchmarks
+
+Per-operator throughput and the cross-library comparison live in
+[`benchmarks/README.md`](https://github.com/vhrabar/serron/blob/main/benchmarks/README.md).
+
+Dilation with a flat SE, `8x3x512x512` float32 on an RTX 5070 Ti, in milliseconds:
+
+|   k |   serron | PyTorch | Kornia | CuPy | SciPy (CPU) |
+|----:|---------:|--------:|-------:|-----:|------------:|
+|   7 | **0.31** |    0.34 |   5.95 | 0.64 |         101 |
+|  31 | **0.53** |    4.73 |    OOM | 2.41 |          94 |
+|  63 | **0.56** |   18.64 |    OOM | 4.77 |          92 |
+| 127 | **0.53** |   70.24 |    OOM | 9.46 |          90 |
+
+
 ## Building from source
 
 ### Clone repo
