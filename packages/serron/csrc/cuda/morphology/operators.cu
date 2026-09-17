@@ -184,9 +184,70 @@ __global__ void morphology_tiled_kernel(const scalar_t* __restrict__ input, cons
 enum class LineAxis : int { kRow = 0, kCol = 1 };
 
 /**
- * Separable line-reduction kernel: one thread per output pixel, block covers a
- * contiguous run of one line plus its halo of @c k-1 samples in shared memory.
+ * In-place inclusive scan of one @p k-sample chunk in shared memory, run by a whole warp.
  *
+ *
+ * @tparam Op        Operation policy (@ref ErodeOp or @ref DilateOp).
+ * @tparam scalar_t  Stored element type; lanes exchange @c at::acc_type<scalar_t>.
+ * @tparam Forward   true scans from the chunk's first sample, false from its last.
+ * @param chunk      Shared-memory base of the chunk; overwritten with the scan.
+ * @param k          Samples in the chunk.
+ * @param lane       Calling thread's lane within its warp.
+ */
+template <typename Op, typename scalar_t, bool Forward>
+__device__ __forceinline__ void scan_chunk_warp(scalar_t* chunk, const int64_t k, const unsigned lane) {
+    using acc_t = at::acc_type<scalar_t, true>;
+    constexpr unsigned kAll = 0xffffffffu;
+
+    const auto neutral = Op::template neutral<acc_t>();
+    const int64_t widths = (k + WARP_SIZE - 1) / WARP_SIZE;
+    acc_t carry = neutral;
+
+    for (int64_t w = 0; w < widths; ++w) {
+        const int64_t idx = (Forward ? w : widths - 1 - w) * WARP_SIZE + lane;
+        const bool inside = idx < k;
+        acc_t v = inside ? static_cast<acc_t>(chunk[idx]) : neutral;
+
+        for (int d = 1; d < WARP_SIZE; d <<= 1) {
+            const acc_t other = Forward ? __shfl_up_sync(kAll, v, d) : __shfl_down_sync(kAll, v, d);
+            const bool consumes = Forward ? lane >= static_cast<unsigned>(d) : lane + d < WARP_SIZE;
+            if (consumes) {
+                v = Op::reduce(v, other);
+            }
+        }
+
+        v = Op::reduce(v, carry);
+        if (inside) {
+            chunk[idx] = static_cast<scalar_t>(v);
+        }
+        carry = __shfl_sync(kAll, v, Forward ? WARP_SIZE - 1 : 0);
+    }
+}
+
+/**
+ * In-place inclusive scan of one @p k-sample chunk in shared memory, run by a single thread.
+ *
+ *
+ * @tparam Op        Operation policy (@ref ErodeOp or @ref DilateOp).
+ * @tparam scalar_t  Stored element type; the scan accumulates in @c at::acc_type<scalar_t>.
+ * @tparam Forward   true scans from the chunk's first sample, false from its last.
+ * @param chunk      Shared-memory base of the chunk; overwritten with the scan.
+ * @param k          Samples in the chunk.
+ */
+template <typename Op, typename scalar_t, bool Forward>
+__device__ __forceinline__ void scan_chunk_serial(scalar_t* chunk, const int64_t k) {
+    using acc_t = at::acc_type<scalar_t, true>;
+
+    acc_t acc = static_cast<acc_t>(chunk[Forward ? 0 : k - 1]);
+    for (int64_t i = 1; i < k; ++i) {
+        const int64_t idx = Forward ? i : k - 1 - i;
+        acc = Op::reduce(acc, static_cast<acc_t>(chunk[idx]));
+        chunk[idx] = static_cast<scalar_t>(acc);
+    }
+}
+
+/**
+ * Separable line-reduction kernel (van Herk / Gil-Werman)
  *
  * @tparam scalar_t  Element type; the reduction accumulates in at::acc_type<scalar_t>.
  * @tparam Op        Operation policy (@ref ErodeOp or @ref DilateOp); only @c neutral and
@@ -200,29 +261,33 @@ enum class LineAxis : int { kRow = 0, kCol = 1 };
  * @param H          Input/output height.
  * @param W          Input/output width.
  * @param k          Window length along @p Axis (kW for kRow, kH for kCol).
+ * @param chunks     Scan windows of @p k samples per block (@ref line_chunks_per_block).
  * @param border     Boundary mode (@ref BorderMode) for out-of-image reads.
  */
 template <typename scalar_t, typename Op, LineAxis Axis>
 __global__ void morphology_line_kernel(const scalar_t* __restrict__ input, scalar_t* __restrict__ output,
                                        const int64_t N, const int64_t C, const int64_t H, const int64_t W,
-                                       const int64_t k, const BorderMode border) {
+                                       const int64_t k, const int64_t chunks, const BorderMode border) {
     using acc_t = at::acc_type<scalar_t, true>;
 
     const int64_t line_len = (Axis == LineAxis::kRow) ? W : H;
     const int64_t anchor = k / 2;
-    const int64_t tile_len = LINE_TILE + k - 1;
+    const int64_t tile_len = chunks * k;
+    const int64_t out_count = tile_len - k + 1;
 
     extern __shared__ __align__(sizeof(double)) unsigned char smem_raw[];
-    auto* s_line = reinterpret_cast<scalar_t*>(smem_raw);
+    auto* s_forward = reinterpret_cast<scalar_t*>(smem_raw);
+    scalar_t* s_backward = s_forward + tile_len;
 
     const int64_t line = blockIdx.y;
     const int64_t nc = blockIdx.z;
     const scalar_t* input_nc = input + nc * H * W;
     scalar_t* output_nc = output + nc * H * W;
 
-    const int64_t tile0 = static_cast<int64_t>(blockIdx.x) * LINE_TILE;
+    const int64_t tile0 = static_cast<int64_t>(blockIdx.x) * out_count;
     const auto neutral = static_cast<scalar_t>(Op::template neutral<acc_t>());
 
+    // Consecutive threads take consecutive samples
     for (int64_t t = threadIdx.x; t < tile_len; t += LINE_TILE) {
         int64_t pos = tile0 + t - anchor;
         const bool valid = resolve_coord(pos, line_len, border);
@@ -234,29 +299,43 @@ __global__ void morphology_line_kernel(const scalar_t* __restrict__ input, scala
                 v = input_nc[pos * W + line];
             }
         }
-        s_line[t] = v;
+        s_forward[t] = v;
+        s_backward[t] = v;
     }
     __syncthreads();
 
-    const int64_t out_pos = tile0 + threadIdx.x;
-    if (out_pos >= line_len)
-        return;
-
-    acc_t acc = Op::template neutral<acc_t>();
-    for (int64_t t = 0; t < k; ++t) {
-        acc = Op::reduce(acc, static_cast<acc_t>(s_line[threadIdx.x + t]));
-    }
-
-    if constexpr (Axis == LineAxis::kRow) {
-        output_nc[line * W + out_pos] = static_cast<scalar_t>(acc);
+    // each scan reads its s own chuck
+    if (k < WARP_SIZE) {
+        for (int64_t chunk = threadIdx.x; chunk < chunks; chunk += LINE_TILE) {
+            scan_chunk_serial<Op, scalar_t, true>(s_forward + chunk * k, k);
+            scan_chunk_serial<Op, scalar_t, false>(s_backward + chunk * k, k);
+        }
     } else {
-        output_nc[out_pos * W + line] = static_cast<scalar_t>(acc);
+        const unsigned lane = threadIdx.x % WARP_SIZE;
+        for (int64_t chunk = threadIdx.x / WARP_SIZE; chunk < chunks; chunk += LINE_WARPS) {
+            scan_chunk_warp<Op, scalar_t, true>(s_forward + chunk * k, k, lane);
+            scan_chunk_warp<Op, scalar_t, false>(s_backward + chunk * k, k, lane);
+        }
+    }
+    __syncthreads();
+
+    for (int64_t i = threadIdx.x; i < out_count; i += LINE_TILE) {
+        const int64_t out_pos = tile0 + i;
+        if (out_pos >= line_len)
+            break;
+
+        const acc_t acc = Op::reduce(static_cast<acc_t>(s_backward[i]), static_cast<acc_t>(s_forward[i + k - 1]));
+        if constexpr (Axis == LineAxis::kRow) {
+            output_nc[line * W + out_pos] = static_cast<scalar_t>(acc);
+        } else {
+            output_nc[out_pos * W + line] = static_cast<scalar_t>(acc);
+        }
     }
 }
 
 /**
  * Chains the row pass (@p input -> @p scratch) into the column pass (@p scratch ->
- * @p output). Requires the structuring element to be flat and axis-separable.
+ * @p output). Requires the structuring element to be flat and axis-separable
  *
  * @param input    Input image, contiguous (N, C, H, W).
  * @param scratch  Intermediate buffer, same shape/dtype as @p input; holds the row-pass result.
@@ -274,18 +353,23 @@ template <typename scalar_t, typename Op>
 void launch_morphology_separable(const scalar_t* input, scalar_t* scratch, scalar_t* output, int64_t N, int64_t C,
                                  int64_t H, int64_t W, int64_t kH, int64_t kW, BorderMode border, cudaStream_t stream) {
     const dim3 block(LINE_TILE);
+    const size_t budget = at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock;
 
-    const size_t smem_row = static_cast<size_t>(LINE_TILE + kW - 1) * sizeof(scalar_t);
-    const dim3 grid_row(static_cast<unsigned int>((W + LINE_TILE - 1) / LINE_TILE), static_cast<unsigned int>(H),
+    const int64_t chunks_row = line_chunks_per_block(kW, W, sizeof(scalar_t), budget);
+    const int64_t out_row = chunks_row * kW - kW + 1;
+    const dim3 grid_row(static_cast<unsigned int>((W + out_row - 1) / out_row), static_cast<unsigned int>(H),
                         static_cast<unsigned int>(N * C));
     morphology_line_kernel<scalar_t, Op, LineAxis::kRow>
-        <<<grid_row, block, smem_row, stream>>>(input, scratch, N, C, H, W, kW, border);
+        <<<grid_row, block, line_smem_bytes(chunks_row, kW, sizeof(scalar_t)), stream>>>(input, scratch, N, C, H, W, kW,
+                                                                                         chunks_row, border);
 
-    const size_t smem_col = static_cast<size_t>(LINE_TILE + kH - 1) * sizeof(scalar_t);
-    const dim3 grid_col(static_cast<unsigned int>((H + LINE_TILE - 1) / LINE_TILE), static_cast<unsigned int>(W),
+    const int64_t chunks_col = line_chunks_per_block(kH, H, sizeof(scalar_t), budget);
+    const int64_t out_col = chunks_col * kH - kH + 1;
+    const dim3 grid_col(static_cast<unsigned int>((H + out_col - 1) / out_col), static_cast<unsigned int>(W),
                         static_cast<unsigned int>(N * C));
     morphology_line_kernel<scalar_t, Op, LineAxis::kCol>
-        <<<grid_col, block, smem_col, stream>>>(scratch, output, N, C, H, W, kH, border);
+        <<<grid_col, block, line_smem_bytes(chunks_col, kH, sizeof(scalar_t)), stream>>>(scratch, output, N, C, H, W,
+                                                                                         kH, chunks_col, border);
 }
 
 /**
@@ -296,7 +380,9 @@ template <typename scalar_t, typename Op>
 void launch_morphology(const scalar_t* input, const scalar_t* kernel, scalar_t* output, scalar_t* scratch,
                        bool use_separable, int64_t N, int64_t C, int64_t H, int64_t W, int64_t kH, int64_t kW,
                        int64_t kernel_channel_stride, BorderMode border, cudaStream_t stream) {
-    if (use_separable) {
+    const size_t budget = at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock;
+
+    if (use_separable && line_smem_bytes(1, std::max(kH, kW), sizeof(scalar_t)) <= budget) {
         launch_morphology_separable<scalar_t, Op>(input, scratch, output, N, C, H, W, kH, kW, border, stream);
         return;
     }
@@ -306,7 +392,7 @@ void launch_morphology(const scalar_t* input, const scalar_t* kernel, scalar_t* 
     const size_t smem = (static_cast<size_t>(tile_h * tile_w) + static_cast<size_t>(kH * kW)) * sizeof(scalar_t);
 
     // path selector -> based on smem budget
-    if (smem <= at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock) {
+    if (smem <= budget) {
         constexpr dim3 block(TILE_X, TILE_Y);
         const dim3 grid(static_cast<unsigned int>((W + TILE_X - 1) / TILE_X),
                         static_cast<unsigned int>((H + TILE_Y - 1) / TILE_Y), static_cast<unsigned int>(N * C));
