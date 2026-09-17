@@ -2,6 +2,7 @@
 
 #include <cpu/morphology/enums.h>
 #include <cpu/morphology/ops_policy.h>
+#include <cpu/morphology/separable.h>
 #include <cpu/utils/boundaries.h>
 
 #include <ATen/AccumulateType.h>
@@ -10,6 +11,7 @@
 #include <c10/util/Exception.h>
 
 #include <cmath>
+#include <cstdint>
 #include <tuple>
 #include <vector>
 
@@ -25,41 +27,30 @@ namespace {
  * (argmin for erosion, argmax for dilation), so the backward is a scatter of the
  * upstream gradient to that selected location. The winning tap is recomputed with
  * the same @c tap / @c reduce / tie-break as the forward pass so the input-grad
- * and SE-grad target the same tap.
- *
- * The per-output recompute is independent and runs under @c at::parallel_for; the
- * accumulating scatter would race across overlapping windows, so it is replayed
- * single-threaded afterwards (the CPU counterpart of the CUDA @c atomicAdd).
+ * and SE-grad target the same tap. Each output element is independent, so the
+ * search runs under @c at::parallel_for.
  *
  * @tparam scalar_t              Element type of the tensors; the reduction accumulates in at::acc_type<scalar_t>.
  * @tparam Op                    Operation policy (@ref ErodeOp or @ref DilateOp).
- * @param grad_output            Upstream gradient, contiguous (N, C, H, W).
  * @param input                  Forward input, contiguous (N, C, H, W).
  * @param kernel                 Forward structuring element, contiguous (kH, kW) or (C, kH, kW).
- * @param grad_input             Gradient w.r.t. @p input, pre-zeroed (N, C, H, W); scattered into.
- * @param grad_kernel            Gradient w.r.t. @p kernel, pre-zeroed, same shape as @p kernel; scattered into.
+ * @param best_in                Per output element, the flat offset of the winning input pixel; written in full.
+ * @param best_k                 Per output element, the flat offset of the winning SE cell; written in full.
  * @param N, C, H, W             Batch / channel / spatial extents.
  * @param kH, kW                 Structuring-element spatial extents.
- * @param kernel_channel_stride  Per-channel stride into @p kernel / @p grad_kernel (kH*kW), or 0 for a shared SE.
+ * @param kernel_channel_stride  Per-channel stride into @p kernel / @c grad_kernel (kH*kW), or 0 for a shared SE.
  * @param border                 Boundary mode (@ref BorderMode) for out-of-image reads.
  */
 template <typename scalar_t, typename Op>
-void morphology_backward_cpu_kernel(const scalar_t* grad_output, const scalar_t* input, const scalar_t* kernel,
-                                    scalar_t* grad_input, scalar_t* grad_kernel, const int64_t N, const int64_t C,
-                                    const int64_t H, const int64_t W, const int64_t kH, const int64_t kW,
-                                    const int64_t kernel_channel_stride, const BorderMode border) {
+void morphology_backward_winners(const scalar_t* input, const scalar_t* kernel, int64_t* best_in, int64_t* best_k,
+                                 const int64_t N, const int64_t C, const int64_t H, const int64_t W, const int64_t kH,
+                                 const int64_t kW, const int64_t kernel_channel_stride, const BorderMode border) {
     using acc_t = at::acc_type<scalar_t, false>;
 
     const int64_t anchor_h = kH / 2;
     const int64_t anchor_w = kW / 2;
     const int64_t total = N * C * H * W;
     const auto neutral = Op::template neutral<acc_t>();
-
-    // Winning tap per output element, as flat offsets into grad_input / grad_kernel.
-    // Filled in parallel (each output element is independent), then scattered
-    // single-threaded so the accumulating adds stay race-free.
-    std::vector<int64_t> best_in(static_cast<size_t>(total));
-    std::vector<int64_t> best_k(static_cast<size_t>(total));
 
     at::parallel_for(0, total, at::internal::GRAIN_SIZE, [&](const int64_t begin, const int64_t end) {
         for (int64_t idx = begin; idx < end; ++idx) {
@@ -103,6 +94,116 @@ void morphology_backward_cpu_kernel(const scalar_t* grad_output, const scalar_t*
             best_k[idx] = c * kernel_channel_stride + best_k_local;
         }
     });
+}
+
+/**
+ * Winning tap per output element, searched as a row pass over @c dj followed by a column
+ * pass over @c di: O(kH+kW) per output element instead of O(kH*kW). The row pass keeps each
+ * line's champion value and its @c dj offset, the column pass reduces those champions and
+ * recovers the full @c (di, dj) tap from the winning row. Both passes use the same strict-
+ * improvement tie-break as the direct search. Requires a flat structuring element, whose
+ * taps leave the samples unchanged.
+ *
+ * @tparam scalar_t              Element type of the tensors; the reduction accumulates in at::acc_type<scalar_t>.
+ * @tparam Op                    Operation policy (@ref ErodeOp or @ref DilateOp).
+ * @param input                  Forward input, contiguous (N, C, H, W).
+ * @param best_in                Per output element, the flat offset of the winning input pixel; written in full.
+ * @param best_k                 Per output element, the flat offset of the winning SE cell; written in full.
+ * @param N, C, H, W             Batch / channel / spatial extents.
+ * @param kH, kW                 Structuring-element spatial extents.
+ * @param kernel_channel_stride  Per-channel stride into @c grad_kernel (kH*kW), or 0 for a shared SE.
+ * @param border                 Boundary mode (@ref BorderMode) for out-of-image reads.
+ */
+template <typename scalar_t, typename Op>
+void morphology_backward_winners_separable(const scalar_t* input, int64_t* best_in, int64_t* best_k, const int64_t N,
+                                           const int64_t C, const int64_t H, const int64_t W, const int64_t kH,
+                                           const int64_t kW, const int64_t kernel_channel_stride,
+                                           const BorderMode border) {
+    using acc_t = at::acc_type<scalar_t, false>;
+
+    const int64_t anchor_h = kH / 2;
+    const int64_t anchor_w = kW / 2;
+    const int64_t total = N * C * H * W;
+    const auto neutral = Op::template neutral<acc_t>();
+
+    std::vector<scalar_t> row_best_val(static_cast<size_t>(total));
+    std::vector<int32_t> row_best_dj(static_cast<size_t>(total));
+
+    at::parallel_for(0, total, at::internal::GRAIN_SIZE, [&](const int64_t begin, const int64_t end) {
+        for (int64_t idx = begin; idx < end; ++idx) {
+            const int64_t w = idx % W;
+            const int64_t nc_h = idx / W;
+
+            const scalar_t* input_line = input + nc_h * W;
+
+            acc_t best = neutral;
+            int32_t best_dj = 0;
+            for (int64_t dj = 0; dj < kW; ++dj) {
+                if (int64_t iw = w + dj - anchor_w; resolve_coord(iw, W, border)) {
+                    const auto val = static_cast<acc_t>(input_line[iw]);
+                    if (const acc_t merged = Op::reduce(best, val); merged != best) {
+                        best = merged;
+                        best_dj = static_cast<int32_t>(dj);
+                    }
+                }
+            }
+            // The centre tap (dj=anchor_w) always resolves in-image
+            row_best_val[idx] = static_cast<scalar_t>(best);
+            row_best_dj[idx] = best_dj;
+        }
+    });
+
+    at::parallel_for(0, total, at::internal::GRAIN_SIZE, [&](const int64_t begin, const int64_t end) {
+        for (int64_t idx = begin; idx < end; ++idx) {
+            const int64_t w = idx % W;
+            const int64_t h = (idx / W) % H;
+            const int64_t c = (idx / (W * H)) % C;
+            const int64_t nc = idx / (W * H);
+
+            const scalar_t* row_val_nc = row_best_val.data() + nc * H * W;
+            const int32_t* row_dj_nc = row_best_dj.data() + nc * H * W;
+
+            acc_t best = neutral;
+            int64_t best_di = 0;
+            int64_t best_ih = -1;
+            for (int64_t di = 0; di < kH; ++di) {
+                if (int64_t ih = h + di - anchor_h; resolve_coord(ih, H, border)) {
+                    const auto val = static_cast<acc_t>(row_val_nc[ih * W + w]);
+                    if (const acc_t merged = Op::reduce(best, val); merged != best) {
+                        best = merged;
+                        best_di = di;
+                        best_ih = ih;
+                    }
+                }
+            }
+
+            // The centre tap (di=anchor_h, dj=anchor_w) always resolves in-image, so best_ih is set.
+            const int32_t dj = row_dj_nc[best_ih * W + w];
+            int64_t iw = w + dj - anchor_w;
+            resolve_coord(iw, W, border);
+
+            best_in[idx] = nc * H * W + best_ih * W + iw;
+            best_k[idx] = c * kernel_channel_stride + best_di * kW + dj;
+        }
+    });
+}
+
+/**
+ * Replays the upstream gradient onto the winning taps.
+ *
+ * @tparam scalar_t     Element type of the tensors; the scatter accumulates in at::acc_type<scalar_t>.
+ * @tparam Op           Operation policy (@ref ErodeOp or @ref DilateOp).
+ * @param grad_output   Upstream gradient, contiguous (N, C, H, W).
+ * @param grad_input    Gradient w.r.t. the forward input, pre-zeroed (N, C, H, W); scattered into.
+ * @param grad_kernel   Gradient w.r.t. the forward SE, pre-zeroed, same shape as the SE; scattered into.
+ * @param best_in       Winning input pixel per output element.
+ * @param best_k        Winning SE cell per output element.
+ * @param total         Output element count (N*C*H*W).
+ */
+template <typename scalar_t, typename Op>
+void scatter_backward(const scalar_t* grad_output, scalar_t* grad_input, scalar_t* grad_kernel, const int64_t* best_in,
+                      const int64_t* best_k, const int64_t total) {
+    using acc_t = at::acc_type<scalar_t, false>;
 
     const auto se_grad_sign = Op::template se_grad_sign<acc_t>();
     for (int64_t idx = 0; idx < total; ++idx) {
@@ -113,10 +214,38 @@ void morphology_backward_cpu_kernel(const scalar_t* grad_output, const scalar_t*
 }
 
 /**
+ * Run the morphology backward pass: the separable row+column argreduce when @p use_separable
+ * was set by the caller (flat, axis-separable SE at/above @ref separable_min_k), otherwise the
+ * direct 2-D search, as @ref morphology_backward_winners. Either way the winners are scattered
+ * by @ref scatter_backward.
+ */
+template <typename scalar_t, typename Op>
+void morphology_backward_cpu(const scalar_t* grad_output, const scalar_t* input, const scalar_t* kernel,
+                             scalar_t* grad_input, scalar_t* grad_kernel, const bool use_separable, const int64_t N,
+                             const int64_t C, const int64_t H, const int64_t W, const int64_t kH, const int64_t kW,
+                             const int64_t kernel_channel_stride, const BorderMode border) {
+    const int64_t total = N * C * H * W;
+
+    // Winning tap per output element, as flat offsets into grad_input / grad_kernel.
+    std::vector<int64_t> best_in(static_cast<size_t>(total));
+    std::vector<int64_t> best_k(static_cast<size_t>(total));
+
+    if (use_separable) {
+        morphology_backward_winners_separable<scalar_t, Op>(input, best_in.data(), best_k.data(), N, C, H, W, kH, kW,
+                                                            kernel_channel_stride, border);
+    } else {
+        morphology_backward_winners<scalar_t, Op>(input, kernel, best_in.data(), best_k.data(), N, C, H, W, kH, kW,
+                                                  kernel_channel_stride, border);
+    }
+
+    scatter_backward<scalar_t, Op>(grad_output, grad_input, grad_kernel, best_in.data(), best_k.data(), total);
+}
+
+/**
  * Shared host-side backward behind @ref erode_backward_cpu / @ref dilate_backward_cpu.
  *
  * CPU mirror of the CUDA @c morphology_backward_impl: validates the inputs, normalises the structuring-element layout,
- * then dispatches on dtype and @p op to @ref morphology_backward_cpu_kernel.
+ * then dispatches on dtype and @p op to @ref morphology_backward_cpu.
  *
  * @param grad_output  Upstream gradient, CPU tensor of shape (N, C, H, W), same dtype as @p input.
  * @param input        Forward input, CPU tensor of shape (N, C, H, W), floating dtype.
@@ -173,6 +302,7 @@ std::tuple<at::Tensor, at::Tensor> morphology_backward_impl(const at::Tensor& gr
     if (input_c.numel() == 0)
         return {grad_input, grad_kernel};
 
+    const bool use_separable = use_separable_path(kernel_c, kH, kW);
     const auto border_mode = static_cast<BorderMode>(border);
 
     AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -184,14 +314,14 @@ std::tuple<at::Tensor, at::Tensor> morphology_backward_impl(const at::Tensor& gr
             auto* grad_kernel_ptr = grad_kernel.data_ptr<scalar_t>();
             switch (op) {
             case MorphOp::kErode:
-                morphology_backward_cpu_kernel<scalar_t, ErodeOp>(grad_output_ptr, input_ptr, kernel_ptr,
-                                                                  grad_input_ptr, grad_kernel_ptr, N, C, H, W, kH, kW,
-                                                                  kernel_channel_stride, border_mode);
+                morphology_backward_cpu<scalar_t, ErodeOp>(grad_output_ptr, input_ptr, kernel_ptr, grad_input_ptr,
+                                                           grad_kernel_ptr, use_separable, N, C, H, W, kH, kW,
+                                                           kernel_channel_stride, border_mode);
                 break;
             case MorphOp::kDilate:
-                morphology_backward_cpu_kernel<scalar_t, DilateOp>(grad_output_ptr, input_ptr, kernel_ptr,
-                                                                   grad_input_ptr, grad_kernel_ptr, N, C, H, W, kH, kW,
-                                                                   kernel_channel_stride, border_mode);
+                morphology_backward_cpu<scalar_t, DilateOp>(grad_output_ptr, input_ptr, kernel_ptr, grad_input_ptr,
+                                                            grad_kernel_ptr, use_separable, N, C, H, W, kH, kW,
+                                                            kernel_channel_stride, border_mode);
                 break;
             }
         });
