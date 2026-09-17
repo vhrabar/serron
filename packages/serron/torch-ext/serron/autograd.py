@@ -41,11 +41,24 @@ class _ErodeFunction(torch.autograd.Function):
         return result
 
     @staticmethod
-    def backward(ctx: torch.autograd.function.FunctionCtx, grad_output: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, None]:
+    def backward(
+        ctx: torch.autograd.function.FunctionCtx, grad_output: torch.Tensor
+    ) -> tuple[torch.Tensor | None, torch.Tensor | None, None]:
+        needs_input, needs_kernel = ctx.needs_input_grad[:2]  # type: ignore[attr-defined]
+        if not (needs_input or needs_kernel):
+            return None, None, None
+
         input_, kernel = ctx.saved_tensors  # type: ignore[attr-defined]
         grad_output = grad_output.to(input_.dtype).contiguous()
-        grad_input, grad_kernel = ops.erode_backward(grad_output, input_, kernel, ctx.border, ctx.flat)  # type: ignore[attr-defined]
-        return grad_input, grad_kernel, None
+        grad_input, grad_kernel = ops.erode_backward(
+            grad_output,
+            input_,
+            kernel,
+            ctx.border,  # type: ignore[attr-defined]
+            ctx.flat,  # type: ignore[attr-defined]
+            needs_kernel,
+        )
+        return (grad_input if needs_input else None), (grad_kernel if needs_kernel else None), None
 
 
 class _DilateFunction(torch.autograd.Function):
@@ -64,8 +77,21 @@ class _DilateFunction(torch.autograd.Function):
         return result
 
     @staticmethod
-    def backward(ctx: torch.autograd.function.FunctionCtx, grad_output: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, None]:
+    def backward(
+        ctx: torch.autograd.function.FunctionCtx, grad_output: torch.Tensor
+    ) -> tuple[torch.Tensor | None, torch.Tensor | None, None]:
+        needs_input, needs_kernel = ctx.needs_input_grad[:2]  # type: ignore[attr-defined]
+        if not (needs_input or needs_kernel):
+            return None, None, None
+
         input_, kernel = ctx.saved_tensors  # type: ignore[attr-defined]
         grad_output = grad_output.to(input_.dtype).contiguous()
-        grad_input, grad_kernel = ops.dilate_backward(grad_output, input_, kernel, ctx.border, ctx.flat)  # type: ignore[attr-defined]
-        return grad_input, grad_kernel, None
+        grad_input, grad_kernel = ops.dilate_backward(
+            grad_output,
+            input_,
+            kernel,
+            ctx.border,  # type: ignore[attr-defined]
+            ctx.flat,  # type: ignore[attr-defined]
+            needs_kernel,
+        )
+        return (grad_input if needs_input else None), (grad_kernel if needs_kernel else None), None

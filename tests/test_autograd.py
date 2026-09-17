@@ -134,3 +134,33 @@ def test_cpu_cuda_backward_parity(op: str, wrt: str, rng: torch.Generator) -> No
         return grad.cpu()
 
     torch.testing.assert_close(grads("cuda"), grads("cpu"))
+
+
+@pytest.mark.parametrize("op", PRIMITIVES)
+@pytest.mark.parametrize("ksize", [3, 21], ids=["direct", "separable"])
+def test_grad_input_unaffected_by_se_requiring_grad(op: str, ksize: int, device: torch.device, rng: torch.Generator) -> None:
+    """The backward skips the grad_kernel scatter for a fixed SE; grad_input must not move."""
+    base = make_image(rng, (1, 2, 12, 14), device=device)
+    kernel = torch.zeros(ksize, ksize, dtype=base.dtype, device=device)
+
+    fixed_x = base.clone().requires_grad_(True)
+    getattr(serron, op)(fixed_x, kernel).sum().backward()
+
+    learned_x = base.clone().requires_grad_(True)
+    learned_k = kernel.clone().requires_grad_(True)
+    getattr(serron, op)(learned_x, learned_k).sum().backward()
+
+    assert torch.equal(fixed_x.grad, learned_x.grad)
+    assert learned_k.grad is not None
+
+
+@pytest.mark.parametrize("op", PRIMITIVES)
+def test_no_gradient_requested_returns_nothing(op: str, device: torch.device, rng: torch.Generator) -> None:
+    """With neither input requiring grad the op produces no graph at all."""
+    x = make_image(rng, (1, 2, 8, 9), device=device)
+    kernel = torch.zeros(3, 3, dtype=x.dtype, device=device)
+
+    out = getattr(serron, op)(x, kernel)
+
+    assert out.grad_fn is None
+    assert not out.requires_grad

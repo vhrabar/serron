@@ -47,7 +47,8 @@ __global__ void morphology_backward_kernel(const scalar_t* __restrict__ grad_out
                                            const scalar_t* __restrict__ kernel, scalar_t* __restrict__ grad_input,
                                            scalar_t* __restrict__ grad_kernel, const int64_t N, const int64_t C,
                                            const int64_t H, const int64_t W, const int64_t kH, const int64_t kW,
-                                           const int64_t kernel_channel_stride, const BorderMode border) {
+                                           const int64_t kernel_channel_stride, const BorderMode border,
+                                           const bool need_kernel_grad) {
     using acc_t = at::acc_type<scalar_t, true>;
 
     const int64_t idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
@@ -98,7 +99,9 @@ __global__ void morphology_backward_kernel(const scalar_t* __restrict__ grad_out
     // The centre tap (di=anchor_h, dj=anchor_w) always resolves in-image, so a winner is guaranteed.
     const acc_t go = static_cast<acc_t>(grad_output[idx]);
     gpuAtomicAdd(&grad_input_nc[best_in], static_cast<scalar_t>(go));
-    gpuAtomicAdd(&grad_kernel_c[best_k], static_cast<scalar_t>(Op::template se_grad_sign<acc_t>() * go));
+    if (need_kernel_grad) {
+        gpuAtomicAdd(&grad_kernel_c[best_k], static_cast<scalar_t>(Op::template se_grad_sign<acc_t>() * go));
+    }
 }
 
 /**
@@ -171,12 +174,13 @@ __global__ void morphology_row_argreduce_kernel(const scalar_t* __restrict__ inp
  * @param border                 Boundary mode (@ref BorderMode) for out-of-image reads.
  */
 template <typename scalar_t, typename Op>
-__global__ void
-morphology_col_argreduce_kernel(const scalar_t* __restrict__ row_best_val, const int32_t* __restrict__ row_best_dj,
-                                const scalar_t* __restrict__ grad_output, scalar_t* __restrict__ grad_input,
-                                scalar_t* __restrict__ grad_kernel, const int64_t N, const int64_t C, const int64_t H,
-                                const int64_t W, const int64_t kH, const int64_t kW,
-                                const int64_t kernel_channel_stride, const BorderMode border) {
+__global__ void morphology_col_argreduce_kernel(const scalar_t* __restrict__ row_best_val,
+                                                const int32_t* __restrict__ row_best_dj,
+                                                const scalar_t* __restrict__ grad_output,
+                                                scalar_t* __restrict__ grad_input, scalar_t* __restrict__ grad_kernel,
+                                                const int64_t N, const int64_t C, const int64_t H, const int64_t W,
+                                                const int64_t kH, const int64_t kW, const int64_t kernel_channel_stride,
+                                                const BorderMode border, const bool need_kernel_grad) {
     using acc_t = at::acc_type<scalar_t, true>;
 
     const int64_t idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
@@ -215,11 +219,12 @@ morphology_col_argreduce_kernel(const scalar_t* __restrict__ row_best_val, const
     const int32_t dj = row_dj_nc[best_ih * W + w];
     int64_t iw = w + dj - anchor_w;
     resolve_coord(iw, W, border);
-    const int64_t best_k = best_di * kW + dj;
-
     const acc_t go = static_cast<acc_t>(grad_output[idx]);
     gpuAtomicAdd(&grad_input_nc[best_ih * W + iw], static_cast<scalar_t>(go));
-    gpuAtomicAdd(&grad_kernel_c[best_k], static_cast<scalar_t>(Op::template se_grad_sign<acc_t>() * go));
+    if (need_kernel_grad) {
+        const int64_t best_k = best_di * kW + dj;
+        gpuAtomicAdd(&grad_kernel_c[best_k], static_cast<scalar_t>(Op::template se_grad_sign<acc_t>() * go));
+    }
 }
 
 /**
@@ -231,7 +236,8 @@ template <typename scalar_t, typename Op>
 void launch_morphology_backward_separable(const scalar_t* input, const scalar_t* grad_output, scalar_t* grad_input,
                                           scalar_t* grad_kernel, scalar_t* row_best_val, int32_t* row_best_dj,
                                           int64_t N, int64_t C, int64_t H, int64_t W, int64_t kH, int64_t kW,
-                                          int64_t kernel_channel_stride, BorderMode border, cudaStream_t stream) {
+                                          int64_t kernel_channel_stride, BorderMode border, bool need_kernel_grad,
+                                          cudaStream_t stream) {
     const int64_t total = N * C * H * W;
     const auto blocks = static_cast<unsigned int>((total + THREADS - 1) / THREADS);
 
@@ -239,7 +245,7 @@ void launch_morphology_backward_separable(const scalar_t* input, const scalar_t*
         <<<blocks, THREADS, 0, stream>>>(input, row_best_val, row_best_dj, N * C, H, W, kW, border);
     morphology_col_argreduce_kernel<scalar_t, Op>
         <<<blocks, THREADS, 0, stream>>>(row_best_val, row_best_dj, grad_output, grad_input, grad_kernel, N, C, H, W,
-                                         kH, kW, kernel_channel_stride, border);
+                                         kH, kW, kernel_channel_stride, border, need_kernel_grad);
 }
 
 /**
@@ -253,18 +259,19 @@ void launch_morphology_backward(const scalar_t* grad_output, const scalar_t* inp
                                 scalar_t* grad_input, scalar_t* grad_kernel, scalar_t* row_best_val,
                                 int32_t* row_best_dj, bool use_separable, int64_t N, int64_t C, int64_t H, int64_t W,
                                 int64_t kH, int64_t kW, int64_t kernel_channel_stride, BorderMode border,
-                                cudaStream_t stream) {
+                                bool need_kernel_grad, cudaStream_t stream) {
     if (use_separable) {
         launch_morphology_backward_separable<scalar_t, Op>(input, grad_output, grad_input, grad_kernel, row_best_val,
                                                            row_best_dj, N, C, H, W, kH, kW, kernel_channel_stride,
-                                                           border, stream);
+                                                           border, need_kernel_grad, stream);
         return;
     }
 
     const int64_t total = N * C * H * W;
     const auto blocks = static_cast<unsigned int>((total + THREADS - 1) / THREADS);
-    morphology_backward_kernel<scalar_t, Op><<<blocks, THREADS, 0, stream>>>(
-        grad_output, input, kernel, grad_input, grad_kernel, N, C, H, W, kH, kW, kernel_channel_stride, border);
+    morphology_backward_kernel<scalar_t, Op>
+        <<<blocks, THREADS, 0, stream>>>(grad_output, input, kernel, grad_input, grad_kernel, N, C, H, W, kH, kW,
+                                         kernel_channel_stride, border, need_kernel_grad);
 }
 
 /**
@@ -283,8 +290,8 @@ void launch_morphology_backward(const scalar_t* grad_output, const scalar_t* inp
  */
 std::tuple<at::Tensor, at::Tensor> morphology_backward_impl(const at::Tensor& grad_output, const at::Tensor& input,
                                                             const at::Tensor& kernel, int64_t border,
-                                                            const std::optional<bool>& flat, MorphOp op,
-                                                            const char* name) {
+                                                            const std::optional<bool>& flat, bool need_kernel_grad,
+                                                            MorphOp op, const char* name) {
     TORCH_CHECK(grad_output.is_cuda(), name, ": grad_output must be a CUDA tensor");
     TORCH_CHECK(input.is_cuda(), name, ": input must be a CUDA tensor");
     TORCH_CHECK(kernel.is_cuda(), name, ": kernel must be a CUDA tensor");
@@ -352,12 +359,12 @@ std::tuple<at::Tensor, at::Tensor> morphology_backward_impl(const at::Tensor& gr
             case MorphOp::kErode:
                 launch_morphology_backward<scalar_t, ErodeOp>(
                     grad_output_ptr, input_ptr, kernel_ptr, grad_input_ptr, grad_kernel_ptr, row_val_ptr, row_dj_ptr,
-                    use_separable, N, C, H, W, kH, kW, kernel_channel_stride, border_mode, stream);
+                    use_separable, N, C, H, W, kH, kW, kernel_channel_stride, border_mode, need_kernel_grad, stream);
                 break;
             case MorphOp::kDilate:
                 launch_morphology_backward<scalar_t, DilateOp>(
                     grad_output_ptr, input_ptr, kernel_ptr, grad_input_ptr, grad_kernel_ptr, row_val_ptr, row_dj_ptr,
-                    use_separable, N, C, H, W, kH, kW, kernel_channel_stride, border_mode, stream);
+                    use_separable, N, C, H, W, kH, kW, kernel_channel_stride, border_mode, need_kernel_grad, stream);
                 break;
             }
         });
@@ -370,15 +377,15 @@ std::tuple<at::Tensor, at::Tensor> morphology_backward_impl(const at::Tensor& gr
 
 std::tuple<at::Tensor, at::Tensor> erode_backward(const at::Tensor& grad_output, const at::Tensor& input,
                                                   const at::Tensor& kernel, const int64_t border,
-                                                  const std::optional<bool>& flat) {
-    return morphology_backward_impl(grad_output, input, kernel, border, flat, MorphOp::kErode,
+                                                  const std::optional<bool>& flat, const bool need_kernel_grad) {
+    return morphology_backward_impl(grad_output, input, kernel, border, flat, need_kernel_grad, MorphOp::kErode,
                                     "serron::erode_backward");
 }
 
 std::tuple<at::Tensor, at::Tensor> dilate_backward(const at::Tensor& grad_output, const at::Tensor& input,
                                                    const at::Tensor& kernel, const int64_t border,
-                                                   const std::optional<bool>& flat) {
-    return morphology_backward_impl(grad_output, input, kernel, border, flat, MorphOp::kDilate,
+                                                   const std::optional<bool>& flat, const bool need_kernel_grad) {
+    return morphology_backward_impl(grad_output, input, kernel, border, flat, need_kernel_grad, MorphOp::kDilate,
                                     "serron::dilate_backward");
 }
 

@@ -202,14 +202,16 @@ void morphology_backward_winners_separable(const scalar_t* input, int64_t* best_
  */
 template <typename scalar_t, typename Op>
 void scatter_backward(const scalar_t* grad_output, scalar_t* grad_input, scalar_t* grad_kernel, const int64_t* best_in,
-                      const int64_t* best_k, const int64_t total) {
+                      const int64_t* best_k, const int64_t total, const bool need_kernel_grad) {
     using acc_t = at::acc_type<scalar_t, false>;
 
     const auto se_grad_sign = Op::template se_grad_sign<acc_t>();
     for (int64_t idx = 0; idx < total; ++idx) {
         const auto go = static_cast<acc_t>(grad_output[idx]);
         grad_input[best_in[idx]] += static_cast<scalar_t>(go);
-        grad_kernel[best_k[idx]] += static_cast<scalar_t>(se_grad_sign * go);
+        if (need_kernel_grad) {
+            grad_kernel[best_k[idx]] += static_cast<scalar_t>(se_grad_sign * go);
+        }
     }
 }
 
@@ -223,7 +225,8 @@ template <typename scalar_t, typename Op>
 void morphology_backward_cpu(const scalar_t* grad_output, const scalar_t* input, const scalar_t* kernel,
                              scalar_t* grad_input, scalar_t* grad_kernel, const bool use_separable, const int64_t N,
                              const int64_t C, const int64_t H, const int64_t W, const int64_t kH, const int64_t kW,
-                             const int64_t kernel_channel_stride, const BorderMode border) {
+                             const int64_t kernel_channel_stride, const BorderMode border,
+                             const bool need_kernel_grad) {
     const int64_t total = N * C * H * W;
 
     // Winning tap per output element, as flat offsets into grad_input / grad_kernel.
@@ -238,7 +241,8 @@ void morphology_backward_cpu(const scalar_t* grad_output, const scalar_t* input,
                                                   kernel_channel_stride, border);
     }
 
-    scatter_backward<scalar_t, Op>(grad_output, grad_input, grad_kernel, best_in.data(), best_k.data(), total);
+    scatter_backward<scalar_t, Op>(grad_output, grad_input, grad_kernel, best_in.data(), best_k.data(), total,
+                                   need_kernel_grad);
 }
 
 /**
@@ -259,8 +263,8 @@ void morphology_backward_cpu(const scalar_t* grad_output, const scalar_t* input,
  */
 std::tuple<at::Tensor, at::Tensor> morphology_backward_impl(const at::Tensor& grad_output, const at::Tensor& input,
                                                             const at::Tensor& kernel, int64_t border,
-                                                            const std::optional<bool>& flat, MorphOp op,
-                                                            const char* name) {
+                                                            const std::optional<bool>& flat, bool need_kernel_grad,
+                                                            MorphOp op, const char* name) {
     TORCH_CHECK(grad_output.is_cpu(), name, ": grad_output must be a CPU tensor");
     TORCH_CHECK(input.is_cpu(), name, ": input must be a CPU tensor");
     TORCH_CHECK(kernel.is_cpu(), name, ": kernel must be a CPU tensor");
@@ -317,12 +321,12 @@ std::tuple<at::Tensor, at::Tensor> morphology_backward_impl(const at::Tensor& gr
             case MorphOp::kErode:
                 morphology_backward_cpu<scalar_t, ErodeOp>(grad_output_ptr, input_ptr, kernel_ptr, grad_input_ptr,
                                                            grad_kernel_ptr, use_separable, N, C, H, W, kH, kW,
-                                                           kernel_channel_stride, border_mode);
+                                                           kernel_channel_stride, border_mode, need_kernel_grad);
                 break;
             case MorphOp::kDilate:
                 morphology_backward_cpu<scalar_t, DilateOp>(grad_output_ptr, input_ptr, kernel_ptr, grad_input_ptr,
                                                             grad_kernel_ptr, use_separable, N, C, H, W, kH, kW,
-                                                            kernel_channel_stride, border_mode);
+                                                            kernel_channel_stride, border_mode, need_kernel_grad);
                 break;
             }
         });
@@ -343,8 +347,8 @@ std::tuple<at::Tensor, at::Tensor> morphology_backward_impl(const at::Tensor& gr
  */
 std::tuple<at::Tensor, at::Tensor> erode_backward_cpu(const at::Tensor& grad_output, const at::Tensor& input,
                                                       const at::Tensor& kernel, const int64_t border,
-                                                      const std::optional<bool>& flat) {
-    return morphology_backward_impl(grad_output, input, kernel, border, flat, MorphOp::kErode,
+                                                      const std::optional<bool>& flat, const bool need_kernel_grad) {
+    return morphology_backward_impl(grad_output, input, kernel, border, flat, need_kernel_grad, MorphOp::kErode,
                                     "serron::erode_backward");
 }
 
@@ -359,8 +363,8 @@ std::tuple<at::Tensor, at::Tensor> erode_backward_cpu(const at::Tensor& grad_out
  */
 std::tuple<at::Tensor, at::Tensor> dilate_backward_cpu(const at::Tensor& grad_output, const at::Tensor& input,
                                                        const at::Tensor& kernel, const int64_t border,
-                                                       const std::optional<bool>& flat) {
-    return morphology_backward_impl(grad_output, input, kernel, border, flat, MorphOp::kDilate,
+                                                       const std::optional<bool>& flat, const bool need_kernel_grad) {
+    return morphology_backward_impl(grad_output, input, kernel, border, flat, need_kernel_grad, MorphOp::kDilate,
                                     "serron::dilate_backward");
 }
 

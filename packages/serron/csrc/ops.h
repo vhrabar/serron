@@ -72,11 +72,14 @@ at::Tensor dilate_cpu(const at::Tensor& input, const at::Tensor& kernel, int64_t
  * @param border       Boundary mode (serron.enums.BorderMode encoding) used in the forward pass.
  * @param flat    Whether @p kernel is flat (all-zero). Pass @c std::nullopt to have the operator check,
  * which reads back from the device and synchronises.
+ * @param need_kernel_grad  Whether grad_kernel is wanted; when false its scatter is skipped and the
+ * returned tensor stays zero.
  * @return             Pair (grad_input, grad_kernel) matching the shapes of @p input and @p kernel.
  */
 std::tuple<at::Tensor, at::Tensor> erode_backward(const at::Tensor& grad_output, const at::Tensor& input,
                                                   const at::Tensor& kernel, int64_t border,
-                                                  const std::optional<bool>& flat = std::nullopt);
+                                                  const std::optional<bool>& flat = std::nullopt,
+                                                  bool need_kernel_grad = true);
 
 /**
  * Backward pass of grayscale dilation.
@@ -90,11 +93,14 @@ std::tuple<at::Tensor, at::Tensor> erode_backward(const at::Tensor& grad_output,
  * @param border       Boundary mode (serron.enums.BorderMode encoding) used in the forward pass.
  * @param flat    Whether @p kernel is flat (all-zero). Pass @c std::nullopt to have the operator check,
  * which reads back from the device and synchronises.
+ * @param need_kernel_grad  Whether grad_kernel is wanted; when false its scatter is skipped and the
+ * returned tensor stays zero.
  * @return             Pair (grad_input, grad_kernel) matching the shapes of @p input and @p kernel.
  */
 std::tuple<at::Tensor, at::Tensor> dilate_backward(const at::Tensor& grad_output, const at::Tensor& input,
                                                    const at::Tensor& kernel, int64_t border,
-                                                   const std::optional<bool>& flat = std::nullopt);
+                                                   const std::optional<bool>& flat = std::nullopt,
+                                                   bool need_kernel_grad = true);
 
 /**
  * Backward pass of grayscale erosion (CPU), mirroring @ref erode_backward.
@@ -105,11 +111,14 @@ std::tuple<at::Tensor, at::Tensor> dilate_backward(const at::Tensor& grad_output
  * @param border       Boundary mode (serron.enums.BorderMode encoding) used in the forward pass.
  * @param flat    Whether @p kernel is flat (all-zero). Pass @c std::nullopt to have the operator check,
  * which reads back from the device and synchronises.
+ * @param need_kernel_grad  Whether grad_kernel is wanted; when false its scatter is skipped and the
+ * returned tensor stays zero.
  * @return             Pair (grad_input, grad_kernel) matching the shapes of @p input and @p kernel.
  */
 std::tuple<at::Tensor, at::Tensor> erode_backward_cpu(const at::Tensor& grad_output, const at::Tensor& input,
                                                       const at::Tensor& kernel, int64_t border,
-                                                      const std::optional<bool>& flat = std::nullopt);
+                                                      const std::optional<bool>& flat = std::nullopt,
+                                                      bool need_kernel_grad = true);
 
 /**
  * Backward pass of grayscale dilation (CPU), mirroring @ref dilate_backward.
@@ -120,11 +129,14 @@ std::tuple<at::Tensor, at::Tensor> erode_backward_cpu(const at::Tensor& grad_out
  * @param border       Boundary mode (serron.enums.BorderMode encoding) used in the forward pass.
  * @param flat    Whether @p kernel is flat (all-zero). Pass @c std::nullopt to have the operator check,
  * which reads back from the device and synchronises.
+ * @param need_kernel_grad  Whether grad_kernel is wanted; when false its scatter is skipped and the
+ * returned tensor stays zero.
  * @return             Pair (grad_input, grad_kernel) matching the shapes of @p input and @p kernel.
  */
 std::tuple<at::Tensor, at::Tensor> dilate_backward_cpu(const at::Tensor& grad_output, const at::Tensor& input,
                                                        const at::Tensor& kernel, int64_t border,
-                                                       const std::optional<bool>& flat = std::nullopt);
+                                                       const std::optional<bool>& flat = std::nullopt,
+                                                       bool need_kernel_grad = true);
 
 } // namespace serron
 
