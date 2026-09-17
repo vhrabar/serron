@@ -194,8 +194,8 @@ void morphology_cpu(const scalar_t* input, const scalar_t* kernel, scalar_t* out
  * @throws c10::Error  if the tensors are not on CPU, have the wrong rank or dtype, the channel counts disagree, or @p
  * border is out of range.
  */
-at::Tensor morphology_impl(const at::Tensor& input, const at::Tensor& kernel, int64_t border, MorphOp op,
-                           const char* name) {
+at::Tensor morphology_impl(const at::Tensor& input, const at::Tensor& kernel, int64_t border,
+                           const std::optional<bool>& flat, MorphOp op, const char* name) {
     TORCH_CHECK(input.is_cpu(), name, ": input must be a CPU tensor");
     TORCH_CHECK(kernel.is_cpu(), name, ": kernel must be a CPU tensor");
     TORCH_CHECK(input.dim() == 4, name, ": input must be 4-D (N, C, H, W), got ", input.dim(), "-D");
@@ -232,7 +232,7 @@ at::Tensor morphology_impl(const at::Tensor& input, const at::Tensor& kernel, in
     if (output.numel() == 0)
         return output;
 
-    const bool use_separable = use_separable_path(kernel_c, kH, kW);
+    const bool use_separable = use_separable_path(resolve_flat(flat, kernel_c), kH, kW);
     at::Tensor scratch;
     if (use_separable) {
         scratch = at::empty_like(input_c);
@@ -271,8 +271,9 @@ at::Tensor morphology_impl(const at::Tensor& input, const at::Tensor& kernel, in
  * @param border        Boundary mode (@ref BorderMode) applied at the image edges.
  * @return              Eroded tensor, same shape and dtype as @p input.
  */
-at::Tensor erode_cpu(const at::Tensor& input, const at::Tensor& kernel, const int64_t border) {
-    return morphology_impl(input, kernel, border, MorphOp::kErode, "serron::erode");
+at::Tensor erode_cpu(const at::Tensor& input, const at::Tensor& kernel, const int64_t border,
+                     const std::optional<bool>& flat) {
+    return morphology_impl(input, kernel, border, flat, MorphOp::kErode, "serron::erode");
 }
 
 /**
@@ -284,8 +285,9 @@ at::Tensor erode_cpu(const at::Tensor& input, const at::Tensor& kernel, const in
  * @param border        Boundary mode (@ref BorderMode) applied at the image edges.
  * @return              Dilated tensor, same shape and dtype as @p input.
  */
-at::Tensor dilate_cpu(const at::Tensor& input, const at::Tensor& kernel, const int64_t border) {
-    return morphology_impl(input, kernel, border, MorphOp::kDilate, "serron::dilate");
+at::Tensor dilate_cpu(const at::Tensor& input, const at::Tensor& kernel, const int64_t border,
+                      const std::optional<bool>& flat) {
+    return morphology_impl(input, kernel, border, flat, MorphOp::kDilate, "serron::dilate");
 }
 
 } // namespace serron

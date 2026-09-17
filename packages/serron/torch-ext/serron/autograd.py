@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import torch
 
+from . import _flatness
 from ._cmake_ops import add_op_namespace_prefix, ops
 
 __all__ = ["_DilateFunction", "_ErodeFunction", "add_op_namespace_prefix", "ops"]
@@ -31,17 +32,19 @@ class _ErodeFunction(torch.autograd.Function):
     def forward(
         ctx: torch.autograd.function.FunctionCtx, input_: torch.Tensor, kernel: torch.Tensor, border: int
     ) -> torch.Tensor:
+        flat = _flatness.is_flat(kernel)
         input_, kernel = _match_dtype(input_, kernel)
         ctx.save_for_backward(input_, kernel)
         ctx.border = border  # type: ignore[attr-defined]
-        result: torch.Tensor = ops.erode(input_, kernel, border)
+        ctx.flat = flat  # type: ignore[attr-defined]
+        result: torch.Tensor = ops.erode(input_, kernel, border, flat)
         return result
 
     @staticmethod
     def backward(ctx: torch.autograd.function.FunctionCtx, grad_output: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, None]:
         input_, kernel = ctx.saved_tensors  # type: ignore[attr-defined]
         grad_output = grad_output.to(input_.dtype).contiguous()
-        grad_input, grad_kernel = ops.erode_backward(grad_output, input_, kernel, ctx.border)  # type: ignore[attr-defined]
+        grad_input, grad_kernel = ops.erode_backward(grad_output, input_, kernel, ctx.border, ctx.flat)  # type: ignore[attr-defined]
         return grad_input, grad_kernel, None
 
 
@@ -52,15 +55,17 @@ class _DilateFunction(torch.autograd.Function):
     def forward(
         ctx: torch.autograd.function.FunctionCtx, input_: torch.Tensor, kernel: torch.Tensor, border: int
     ) -> torch.Tensor:
+        flat = _flatness.is_flat(kernel)
         input_, kernel = _match_dtype(input_, kernel)
         ctx.save_for_backward(input_, kernel)
         ctx.border = border  # type: ignore[attr-defined]
-        result: torch.Tensor = ops.dilate(input_, kernel, border)
+        ctx.flat = flat  # type: ignore[attr-defined]
+        result: torch.Tensor = ops.dilate(input_, kernel, border, flat)
         return result
 
     @staticmethod
     def backward(ctx: torch.autograd.function.FunctionCtx, grad_output: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, None]:
         input_, kernel = ctx.saved_tensors  # type: ignore[attr-defined]
         grad_output = grad_output.to(input_.dtype).contiguous()
-        grad_input, grad_kernel = ops.dilate_backward(grad_output, input_, kernel, ctx.border)  # type: ignore[attr-defined]
+        grad_input, grad_kernel = ops.dilate_backward(grad_output, input_, kernel, ctx.border, ctx.flat)  # type: ignore[attr-defined]
         return grad_input, grad_kernel, None

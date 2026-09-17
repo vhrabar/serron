@@ -4,12 +4,16 @@
 #include <ATen/autocast_mode.h>
 #include <torch/library.h>
 
+#include <optional>
+
 // Operator schemas, registered under the serron:: namespace.
 TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
-    ops.def("erode(Tensor input, Tensor kernel, int border) -> Tensor");
-    ops.def("dilate(Tensor input, Tensor kernel, int border) -> Tensor");
-    ops.def("erode_backward(Tensor grad_output, Tensor input, Tensor kernel, int border) -> (Tensor, Tensor)");
-    ops.def("dilate_backward(Tensor grad_output, Tensor input, Tensor kernel, int border) -> (Tensor, Tensor)");
+    ops.def("erode(Tensor input, Tensor kernel, int border, bool? flat=None) -> Tensor");
+    ops.def("dilate(Tensor input, Tensor kernel, int border, bool? flat=None) -> Tensor");
+    ops.def("erode_backward(Tensor grad_output, Tensor input, Tensor kernel, int border, bool? flat=None) -> (Tensor, "
+            "Tensor)");
+    ops.def("dilate_backward(Tensor grad_output, Tensor input, Tensor kernel, int border, bool? flat=None) -> (Tensor, "
+            "Tensor)");
 }
 
 // CPU implementation
@@ -37,26 +41,30 @@ at::ScalarType morphology_exec_type(const at::Tensor& input, const at::Tensor& k
                                       input, kernel);
 }
 
-at::Tensor erode_autocast(const at::Tensor& input, const at::Tensor& kernel, int64_t border) {
+at::Tensor erode_autocast(const at::Tensor& input, const at::Tensor& kernel, int64_t border,
+                          const std::optional<bool>& flat) {
     c10::impl::ExcludeDispatchKeyGuard no_autocast(c10::autocast_dispatch_keyset);
     const c10::DeviceType device_type = input.device().type();
     const at::ScalarType exec_type = morphology_exec_type(input, kernel, device_type);
-    static auto op = c10::Dispatcher::singleton()
-                         .findSchemaOrThrow("serron::erode", "")
-                         .typed<at::Tensor(const at::Tensor&, const at::Tensor&, int64_t)>();
+    static auto op =
+        c10::Dispatcher::singleton()
+            .findSchemaOrThrow("serron::erode", "")
+            .typed<at::Tensor(const at::Tensor&, const at::Tensor&, int64_t, const std::optional<bool>&)>();
     return op.call(at::autocast::cached_cast(exec_type, input, device_type),
-                   at::autocast::cached_cast(exec_type, kernel, device_type), border);
+                   at::autocast::cached_cast(exec_type, kernel, device_type), border, flat);
 }
 
-at::Tensor dilate_autocast(const at::Tensor& input, const at::Tensor& kernel, int64_t border) {
+at::Tensor dilate_autocast(const at::Tensor& input, const at::Tensor& kernel, int64_t border,
+                           const std::optional<bool>& flat) {
     c10::impl::ExcludeDispatchKeyGuard no_autocast(c10::autocast_dispatch_keyset);
     const c10::DeviceType device_type = input.device().type();
     const at::ScalarType exec_type = morphology_exec_type(input, kernel, device_type);
-    static auto op = c10::Dispatcher::singleton()
-                         .findSchemaOrThrow("serron::dilate", "")
-                         .typed<at::Tensor(const at::Tensor&, const at::Tensor&, int64_t)>();
+    static auto op =
+        c10::Dispatcher::singleton()
+            .findSchemaOrThrow("serron::dilate", "")
+            .typed<at::Tensor(const at::Tensor&, const at::Tensor&, int64_t, const std::optional<bool>&)>();
     return op.call(at::autocast::cached_cast(exec_type, input, device_type),
-                   at::autocast::cached_cast(exec_type, kernel, device_type), border);
+                   at::autocast::cached_cast(exec_type, kernel, device_type), border, flat);
 }
 
 } // namespace

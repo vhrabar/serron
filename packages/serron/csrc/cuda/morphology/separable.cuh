@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <optional>
 
 namespace serron {
 
@@ -59,11 +60,21 @@ inline bool se_is_flat(const at::Tensor& kernel_c) {
 }
 
 /**
- * True when (@p kH, @p kW) and @p kernel_c justify the separable r+c path over the tiled/GMEM 2-D kernels, per @ref
+ * Flatness of @p kernel_c
+ *
+ * @param flat      Caller's answer, or @c std::nullopt to check @p kernel_c directly.
+ * @param kernel_c  Contiguous structuring element.
+ */
+inline bool resolve_flat(const std::optional<bool>& flat, const at::Tensor& kernel_c) {
+    return flat.has_value() ? *flat : se_is_flat(kernel_c);
+}
+
+/**
+ * True when @p is_flat and (@p kH, @p kW) justify the separable r+c path over the tiled/GMEM 2-D kernels, per @ref
  * separable_min_k.
  */
-inline bool use_separable_path(const at::Tensor& kernel_c, int64_t kH, int64_t kW) {
-    return std::max(kH, kW) >= separable_min_k() && se_is_flat(kernel_c);
+inline bool use_separable_path(const bool is_flat, const int64_t kH, const int64_t kW) {
+    return is_flat && std::max(kH, kW) >= separable_min_k();
 }
 
 } // namespace serron

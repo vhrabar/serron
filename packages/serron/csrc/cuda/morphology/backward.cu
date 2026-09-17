@@ -282,7 +282,8 @@ void launch_morphology_backward(const scalar_t* grad_output, const scalar_t* inp
  * border is out of range.
  */
 std::tuple<at::Tensor, at::Tensor> morphology_backward_impl(const at::Tensor& grad_output, const at::Tensor& input,
-                                                            const at::Tensor& kernel, int64_t border, MorphOp op,
+                                                            const at::Tensor& kernel, int64_t border,
+                                                            const std::optional<bool>& flat, MorphOp op,
                                                             const char* name) {
     TORCH_CHECK(grad_output.is_cuda(), name, ": grad_output must be a CUDA tensor");
     TORCH_CHECK(input.is_cuda(), name, ": input must be a CUDA tensor");
@@ -326,7 +327,7 @@ std::tuple<at::Tensor, at::Tensor> morphology_backward_impl(const at::Tensor& gr
     if (input_c.numel() == 0)
         return {grad_input, grad_kernel};
 
-    const bool use_separable = use_separable_path(kernel_c, kH, kW);
+    const bool use_separable = use_separable_path(resolve_flat(flat, kernel_c), kH, kW);
     at::Tensor row_best_val;
     at::Tensor row_best_dj;
     if (use_separable) {
@@ -368,13 +369,17 @@ std::tuple<at::Tensor, at::Tensor> morphology_backward_impl(const at::Tensor& gr
 } // namespace
 
 std::tuple<at::Tensor, at::Tensor> erode_backward(const at::Tensor& grad_output, const at::Tensor& input,
-                                                  const at::Tensor& kernel, const int64_t border) {
-    return morphology_backward_impl(grad_output, input, kernel, border, MorphOp::kErode, "serron::erode_backward");
+                                                  const at::Tensor& kernel, const int64_t border,
+                                                  const std::optional<bool>& flat) {
+    return morphology_backward_impl(grad_output, input, kernel, border, flat, MorphOp::kErode,
+                                    "serron::erode_backward");
 }
 
 std::tuple<at::Tensor, at::Tensor> dilate_backward(const at::Tensor& grad_output, const at::Tensor& input,
-                                                   const at::Tensor& kernel, const int64_t border) {
-    return morphology_backward_impl(grad_output, input, kernel, border, MorphOp::kDilate, "serron::dilate_backward");
+                                                   const at::Tensor& kernel, const int64_t border,
+                                                   const std::optional<bool>& flat) {
+    return morphology_backward_impl(grad_output, input, kernel, border, flat, MorphOp::kDilate,
+                                    "serron::dilate_backward");
 }
 
 } // namespace serron

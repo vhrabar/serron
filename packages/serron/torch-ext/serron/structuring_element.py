@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import torch
 
+from . import _flatness
+
 _OFF = float("-inf")
 
 
@@ -15,7 +17,7 @@ def _flat(mask: torch.Tensor) -> torch.Tensor:
     :param mask: input mask
     :return: flat additive SE
     """
-    return torch.where(mask, 0.0, _OFF).to(torch.float32)
+    return _flatness.mark(torch.where(mask, 0.0, _OFF).to(torch.float32), False)
 
 
 def _centered_coords(size: int, device: torch.device | str | None) -> torch.Tensor:
@@ -37,7 +39,7 @@ def square(size: int, *, device: torch.device | str | None = None) -> torch.Tens
     """
     if size < 1:
         raise ValueError(f"size must be >= 1, got {size}")
-    return torch.zeros(size, size, dtype=torch.float32, device=device)
+    return _flatness.mark(torch.zeros(size, size, dtype=torch.float32, device=device), True)
 
 
 def cross(size: int, *, device: torch.device | str | None = None) -> torch.Tensor:
