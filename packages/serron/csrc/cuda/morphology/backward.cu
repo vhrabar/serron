@@ -453,15 +453,15 @@ bool launch_morphology_backward_separable(const scalar_t* input, const scalar_t*
     const int64_t out_row = chunks_row * kW - kW + 1;
     const dim3 grid_row(static_cast<unsigned int>((W + out_row - 1) / out_row), static_cast<unsigned int>(H),
                         static_cast<unsigned int>(N * C));
-    morphology_row_argreduce_kernel<scalar_t, Op><<<grid_row, block, smem_row, stream>>>(
-        input, row_best_val, row_best_dj, H, W, kW, chunks_row, border);
+    morphology_row_argreduce_kernel<scalar_t, Op>
+        <<<grid_row, block, smem_row, stream>>>(input, row_best_val, row_best_dj, H, W, kW, chunks_row, border);
 
     const int64_t out_col = chunks_col * kH - kH + 1;
     const dim3 grid_col(static_cast<unsigned int>((H + out_col - 1) / out_col), static_cast<unsigned int>(W),
                         static_cast<unsigned int>(N * C));
-    morphology_col_argreduce_kernel<scalar_t, Op><<<grid_col, block, smem_col, stream>>>(
-        row_best_val, row_best_dj, grad_output, grad_input, grad_kernel, C, H, W, kH, kW, chunks_col,
-        kernel_channel_stride, border, need_kernel_grad);
+    morphology_col_argreduce_kernel<scalar_t, Op>
+        <<<grid_col, block, smem_col, stream>>>(row_best_val, row_best_dj, grad_output, grad_input, grad_kernel, C, H,
+                                                W, kH, kW, chunks_col, kernel_channel_stride, border, need_kernel_grad);
     return true;
 }
 

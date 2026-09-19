@@ -36,9 +36,8 @@ bool configure_kernel_smem(KernelFn kernel, const size_t bytes) {
     if (bytes > smem_budget()) {
         return false;
     }
-    const cudaError_t status = cudaFuncSetAttribute(reinterpret_cast<const void*>(kernel),
-                                                    cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                                    static_cast<int>(bytes));
+    const cudaError_t status = cudaFuncSetAttribute(
+        reinterpret_cast<const void*>(kernel), cudaFuncAttributeMaxDynamicSharedMemorySize, static_cast<int>(bytes));
     if (status != cudaSuccess) {
         (void)cudaGetLastError();
         return false;

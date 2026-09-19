@@ -22,17 +22,31 @@ _NEVER = 1 << 20
 def _measure(shape: str, k: int, op: str, border: str, reps: int, min_k: int) -> dict[str, float]:
     """Time one configuration in a fresh process with ``SERRON_SEPARABLE_MIN_K`` set to ``min_k``."""
     out = subprocess.run(
-        [sys.executable, "-m", "benchmarks._separable_worker", "--shape", shape, "--k", str(k),
-         "--op", op, "--border", border, "--reps", str(reps)],
-        capture_output=True, text=True, check=True,
+        [
+            sys.executable,
+            "-m",
+            "benchmarks._separable_worker",
+            "--shape",
+            shape,
+            "--k",
+            str(k),
+            "--op",
+            op,
+            "--border",
+            border,
+            "--reps",
+            str(reps),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
         env={**os.environ, "SERRON_SEPARABLE_MIN_K": str(min_k)},
     )
     return json.loads(out.stdout.strip().splitlines()[-1])
 
 
 def _first_lasting_win(ks: list[int], wins: list[bool]) -> int | None:
-    """Smallest k whose win holds for every larger k too.
-    """
+    """Smallest k whose win holds for every larger k too."""
     lasting = None
     for k, won in zip(reversed(ks), reversed(wins), strict=True):
         if not won:
@@ -60,12 +74,17 @@ def main() -> None:
         fwd_wins.append(sep["fwd_ms"] < direct["fwd_ms"])
         both_wins.append(sep["fwd_bwd_ms"] < direct["fwd_bwd_ms"])
 
-        rows.append([
-            str(k),
-            f"{sep['fwd_ms']:.3f}", f"{direct['fwd_ms']:.3f}", f"{direct['fwd_ms'] / sep['fwd_ms']:.2f}x",
-            f"{sep['fwd_bwd_ms']:.3f}", f"{direct['fwd_bwd_ms']:.3f}",
-            f"{direct['fwd_bwd_ms'] / sep['fwd_bwd_ms']:.2f}x",
-        ])
+        rows.append(
+            [
+                str(k),
+                f"{sep['fwd_ms']:.3f}",
+                f"{direct['fwd_ms']:.3f}",
+                f"{direct['fwd_ms'] / sep['fwd_ms']:.2f}x",
+                f"{sep['fwd_bwd_ms']:.3f}",
+                f"{direct['fwd_bwd_ms']:.3f}",
+                f"{direct['fwd_bwd_ms'] / sep['fwd_bwd_ms']:.2f}x",
+            ]
+        )
 
     import torch
 
