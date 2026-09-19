@@ -42,7 +42,8 @@ def _measure(shape: str, k: int, op: str, border: str, reps: int, min_k: int) ->
         check=True,
         env={**os.environ, "SERRON_SEPARABLE_MIN_K": str(min_k)},
     )
-    return json.loads(out.stdout.strip().splitlines()[-1])
+    result: dict[str, float] = json.loads(out.stdout.strip().splitlines()[-1])
+    return result
 
 
 def _first_lasting_win(ks: list[int], wins: list[bool]) -> int | None:

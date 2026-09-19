@@ -150,6 +150,7 @@ def test_grad_input_unaffected_by_se_requiring_grad(op: str, ksize: int, device:
     learned_k = kernel.clone().requires_grad_(True)
     getattr(serron, op)(learned_x, learned_k).sum().backward()
 
+    assert fixed_x.grad is not None and learned_x.grad is not None
     assert torch.equal(fixed_x.grad, learned_x.grad)
     assert learned_k.grad is not None
 
@@ -187,6 +188,7 @@ def test_tie_break_keeps_the_lowest_offset(op: str, ksize: int, device: torch.de
             iw = min(max(w - anchor, 0), shape[3] - 1)
             expected[:, :, ih, iw] += 1.0
 
+    assert x.grad is not None
     assert torch.equal(x.grad, expected)
 
 
@@ -202,6 +204,7 @@ def test_tie_break_matches_across_devices(op: str, ksize: int, rng: torch.Genera
         x = quantised.clone().to(device).requires_grad_(True)
         kernel = torch.zeros(ksize, ksize, dtype=x.dtype, device=device)
         getattr(serron, op)(x, kernel).sum().backward()
+        assert x.grad is not None
         grads.append(x.grad.cpu())
 
     assert torch.equal(grads[0], grads[1])

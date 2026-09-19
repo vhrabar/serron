@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import json
 import statistics
+from collections.abc import Callable
 
 import torch
 
@@ -16,14 +17,14 @@ from serron import BorderMode
 _BORDERS = {"reflect": BorderMode.REFLECT, "replicate": BorderMode.REPLICATE, "constant": BorderMode.CONSTANT}
 
 
-def _time_ms(fn, reps: int) -> float:
+def _time_ms(fn: Callable[[], object], reps: int) -> float:
     """Median wall time in ms over ``reps`` CUDA-timed repetitions, after a warmup call."""
     fn()
     torch.cuda.synchronize()
 
-    start = torch.cuda.Event(enable_timing=True)
-    end = torch.cuda.Event(enable_timing=True)
-    samples = []
+    start = torch.cuda.Event(enable_timing=True)  # type: ignore[no-untyped-call]
+    end = torch.cuda.Event(enable_timing=True)  # type: ignore[no-untyped-call]
+    samples: list[float] = []
     for _ in range(reps):
         start.record()
         fn()
@@ -51,7 +52,8 @@ def main() -> None:
     kernel = torch.zeros(c, args.k, args.k, device=device)  # flat -> separable-eligible
 
     def fwd() -> torch.Tensor:
-        return func(x, kernel, border=border)
+        out: torch.Tensor = func(x, kernel, border=border)
+        return out
 
     fwd_ms = _time_ms(fwd, args.reps)
 
