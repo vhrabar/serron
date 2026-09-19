@@ -97,21 +97,93 @@ void morphology_backward_winners(const scalar_t* input, const scalar_t* kernel, 
 }
 
 /**
- * Winning tap per output element, searched as a row pass over @c dj followed by a column
- * pass over @c di: O(kH+kW) per output element instead of O(kH*kW). The row pass keeps each
- * line's champion value and its @c dj offset, the column pass reduces those champions and
- * recovers the full @c (di, dj) tap from the winning row. Both passes use the same strict-
- * improvement tie-break as the direct search. Requires a flat structuring element, whose
- * taps leave the samples unchanged.
+ * A candidate tap
  *
- * @tparam scalar_t              Element type of the tensors; the reduction accumulates in at::acc_type<scalar_t>.
+ * @tparam acc_t  Accumulate type of the value being reduced.
+ */
+template <typename acc_t>
+struct ArgTap {
+    acc_t val;
+    int64_t idx;
+};
+
+/**
+ * Combines two candidates, @p lo holding the lower sample offsets and @p hi the higher.
+ *
+ */
+template <typename Op, typename acc_t>
+inline ArgTap<acc_t> arg_combine(const ArgTap<acc_t>& lo, const ArgTap<acc_t>& hi) {
+    return Op::reduce(lo.val, hi.val) != lo.val ? hi : lo;
+}
+
+/**
+ * One separable argreduce pass (van Herk / Gil-Werman) over every line of one axis.
+ *
+ * The scans carry @ref ArgTap, so each output yields the offset that won it as well as the
+ * value. Every output window straddles exactly one chunk boundary, so one @ref arg_combine of
+ * the backward scan at its first sample and the forward scan at its last settles it, whatever
+ * @p k is.
+ *
+ * @tparam scalar_t  Element type; the reduction accumulates in at::acc_type<scalar_t, false>.
+ * @tparam Op        Operation policy (@ref ErodeOp or @ref DilateOp).
+ * @param read       Returns the sample at (line, position) for an in-image position.
+ * @param write      Receives (line, position, winning value, winning offset).
+ * @param lines      Lines along the axis.
+ * @param line_len   Samples per line.
+ * @param k          Window length along the axis.
+ * @param border     Boundary mode (@ref BorderMode) for out-of-image reads.
+ */
+template <typename scalar_t, typename Op, typename Read, typename Write>
+void argreduce_lines(Read read, Write write, const int64_t lines, const int64_t line_len, const int64_t k,
+                     const BorderMode border) {
+    using acc_t = at::acc_type<scalar_t, false>;
+
+    const int64_t anchor = k / 2;
+    const int64_t span = line_len + k - 1;         // positions [-anchor, line_len + k - 1 - anchor)
+    const int64_t padded = (span + k - 1) / k * k; // whole chunks of k -> both scans reset in step
+    const auto neutral = Op::template neutral<acc_t>();
+    const int64_t grain = std::max<int64_t>(1, at::internal::GRAIN_SIZE / std::max<int64_t>(line_len, 1));
+
+    at::parallel_for(0, lines, grain, [&](const int64_t begin, const int64_t end) {
+        std::vector<ArgTap<acc_t>> samples(static_cast<size_t>(padded));
+        std::vector<ArgTap<acc_t>> prefix(static_cast<size_t>(padded));
+        std::vector<ArgTap<acc_t>> suffix(static_cast<size_t>(padded));
+
+        for (int64_t line = begin; line < end; ++line) {
+            for (int64_t t = 0; t < padded; ++t) {
+                int64_t pos = t - anchor;
+                const bool inside = t < span && resolve_coord(pos, line_len, border);
+                samples[t] = {inside ? static_cast<acc_t>(read(line, pos)) : neutral, t};
+            }
+
+            for (int64_t t = 0; t < padded; ++t) {
+                prefix[t] = (t % k == 0) ? samples[t] : arg_combine<Op>(prefix[t - 1], samples[t]);
+            }
+            for (int64_t t = padded - 1; t >= 0; --t) {
+                suffix[t] = (t % k == k - 1) ? samples[t] : arg_combine<Op>(samples[t], suffix[t + 1]);
+            }
+
+            for (int64_t out_pos = 0; out_pos < line_len; ++out_pos) {
+                const ArgTap<acc_t> tap = arg_combine<Op>(suffix[out_pos], prefix[out_pos + k - 1]);
+                write(line, out_pos, tap.val, tap.idx - out_pos);
+            }
+        }
+    });
+}
+
+/**
+ * Separable winner search: a row pass over W, then a column pass over H, each O(1) per output
+ * in the window length. Needs a flat, axis-separable SE.
+ *
+ * @tparam scalar_t              Element type.
  * @tparam Op                    Operation policy (@ref ErodeOp or @ref DilateOp).
  * @param input                  Forward input, contiguous (N, C, H, W).
- * @param best_in                Per output element, the flat offset of the winning input pixel; written in full.
- * @param best_k                 Per output element, the flat offset of the winning SE cell; written in full.
+ * @param best_in                Receives the winning input offset per output element.
+ * @param best_k                 Receives the winning SE offset per output element.
  * @param N, C, H, W             Batch / channel / spatial extents.
- * @param kH, kW                 Structuring-element spatial extents.
- * @param kernel_channel_stride  Per-channel stride into @c grad_kernel (kH*kW), or 0 for a shared SE.
+ * @param kH                     Structuring-element height.
+ * @param kW                     Structuring-element width.
+ * @param kernel_channel_stride  Per-channel stride into the SE (kH*kW), or 0 for a shared SE.
  * @param border                 Boundary mode (@ref BorderMode) for out-of-image reads.
  */
 template <typename scalar_t, typename Op>
@@ -124,68 +196,41 @@ void morphology_backward_winners_separable(const scalar_t* input, int64_t* best_
     const int64_t anchor_h = kH / 2;
     const int64_t anchor_w = kW / 2;
     const int64_t total = N * C * H * W;
-    const auto neutral = Op::template neutral<acc_t>();
 
     std::vector<scalar_t> row_best_val(static_cast<size_t>(total));
     std::vector<int32_t> row_best_dj(static_cast<size_t>(total));
 
-    at::parallel_for(0, total, at::internal::GRAIN_SIZE, [&](const int64_t begin, const int64_t end) {
-        for (int64_t idx = begin; idx < end; ++idx) {
-            const int64_t w = idx % W;
-            const int64_t nc_h = idx / W;
+    // Row pass: line == nc * H + h, since the input is contiguous (..., H, W)
+    argreduce_lines<scalar_t, Op>([&](const int64_t line, const int64_t pos) { return input[line * W + pos]; },
+                                  [&](const int64_t line, const int64_t w, const acc_t val, const int64_t dj) {
+                                      row_best_val[line * W + w] = static_cast<scalar_t>(val);
+                                      row_best_dj[line * W + w] = static_cast<int32_t>(dj);
+                                  },
+                                  N * C * H, W, kW, border);
 
-            const scalar_t* input_line = input + nc_h * W;
+    // Column pass: line == nc * W + w, walking H with stride W
+    argreduce_lines<scalar_t, Op>(
+        [&](const int64_t line, const int64_t pos) {
+            const int64_t nc = line / W;
+            const int64_t w = line % W;
+            return row_best_val[nc * H * W + pos * W + w];
+        },
+        [&](const int64_t line, const int64_t h, const acc_t, const int64_t di) {
+            const int64_t nc = line / W;
+            const int64_t w = line % W;
+            const int64_t c = nc % C;
 
-            acc_t best = neutral;
-            int32_t best_dj = 0;
-            for (int64_t dj = 0; dj < kW; ++dj) {
-                if (int64_t iw = w + dj - anchor_w; resolve_coord(iw, W, border)) {
-                    const auto val = static_cast<acc_t>(input_line[iw]);
-                    if (const acc_t merged = Op::reduce(best, val); merged != best) {
-                        best = merged;
-                        best_dj = static_cast<int32_t>(dj);
-                    }
-                }
-            }
-            // The centre tap (dj=anchor_w) always resolves in-image
-            row_best_val[idx] = static_cast<scalar_t>(best);
-            row_best_dj[idx] = best_dj;
-        }
-    });
-
-    at::parallel_for(0, total, at::internal::GRAIN_SIZE, [&](const int64_t begin, const int64_t end) {
-        for (int64_t idx = begin; idx < end; ++idx) {
-            const int64_t w = idx % W;
-            const int64_t h = (idx / W) % H;
-            const int64_t c = (idx / (W * H)) % C;
-            const int64_t nc = idx / (W * H);
-
-            const scalar_t* row_val_nc = row_best_val.data() + nc * H * W;
-            const int32_t* row_dj_nc = row_best_dj.data() + nc * H * W;
-
-            acc_t best = neutral;
-            int64_t best_di = 0;
-            int64_t best_ih = -1;
-            for (int64_t di = 0; di < kH; ++di) {
-                if (int64_t ih = h + di - anchor_h; resolve_coord(ih, H, border)) {
-                    const auto val = static_cast<acc_t>(row_val_nc[ih * W + w]);
-                    if (const acc_t merged = Op::reduce(best, val); merged != best) {
-                        best = merged;
-                        best_di = di;
-                        best_ih = ih;
-                    }
-                }
-            }
-
-            // The centre tap (di=anchor_h, dj=anchor_w) always resolves in-image, so best_ih is set.
-            const int32_t dj = row_dj_nc[best_ih * W + w];
+            int64_t ih = h + di - anchor_h;
+            resolve_coord(ih, H, border);
+            const int32_t dj = row_best_dj[nc * H * W + ih * W + w];
             int64_t iw = w + dj - anchor_w;
             resolve_coord(iw, W, border);
 
-            best_in[idx] = nc * H * W + best_ih * W + iw;
-            best_k[idx] = c * kernel_channel_stride + best_di * kW + dj;
-        }
-    });
+            const int64_t idx = nc * H * W + h * W + w;
+            best_in[idx] = nc * H * W + ih * W + iw;
+            best_k[idx] = c * kernel_channel_stride + di * kW + dj;
+        },
+        N * C * W, H, kH, border);
 }
 
 /**

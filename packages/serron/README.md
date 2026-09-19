@@ -107,8 +107,9 @@ device's shared memory decide which one.
 | Element-wise                  | Otherwise; reads through global memory (CUDA only)            | O(kH × kW)                |
 
 `SERRON_SEPARABLE_MIN_K` is the window length where the separable path takes over. It
-defaults to `20` and accepts any positive integer, it was chosen as a borderline where the 
-separable path beats the tiled 2-D path.
+accepts any positive integer. The default differs per backend because it marks where the
+separable path starts beating the 2-D one, and that point is not the same on both: `11` on
+CUDA, `5` on CPU, where there is no tiled 2-D kernel to soften the `kH × kW` window.
 
 ### The separable path
 
@@ -122,10 +123,17 @@ On CPU the lines go through `at::parallel_for`.
 
 ### Backward
 
-Backward needs to know where the winning sample was, not just what it was, so the two
-scans don't help. It still splits on the same condition: a separable row and column
-argreduce for a flat SE at or above the threshold, and a direct recompute of the winning
-tap otherwise.
+Backward needs to know *where* the winning sample was, not just what it was, so its scans
+carry a `(value, offset)` pair rather than a bare value. Combining two of those keeps the
+lower offset on a tie, which is the rule the direct kernel gets from its strict-improvement
+loop — reproducing it exactly is what makes the two paths agree on which tap receives the
+gradient. The window is one pair-combine as before, so the search is O(1) in the window
+length on both the row and the column pass.
+
+It splits on the same condition: a separable row and column argreduce for a flat SE at or
+above the threshold, and a direct recompute of the winning tap otherwise. The direct
+recompute stages its window in shared memory the same way the forward's tiled path does.
+
 
 ## Benchmarks
 

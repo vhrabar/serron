@@ -24,7 +24,7 @@ inline int64_t separable_min_k() {
                 return static_cast<int64_t>(parsed);
             }
         }
-        return static_cast<int64_t>(20);
+        return static_cast<int64_t>(11);
     }();
     return value;
 }
