@@ -155,14 +155,15 @@ recompute stages its window in shared memory the same way the forward's tiled pa
 Per-operator throughput and the cross-library comparison live in
 [`benchmarks/README.md`](https://github.com/vhrabar/serron/blob/main/benchmarks/README.md).
 
-Dilation with a flat SE, `8x3x512x512` float32 on an RTX 5070 Ti, in milliseconds:
+Erosion with a flat SE, `8x3x512x512` float32 on an H100 PCIe (with Intel Xeon Platinum 8480+), in milliseconds:
 
 |   k |   serron | PyTorch | Kornia | CuPy | SciPy (CPU) |
 |----:|---------:|--------:|-------:|-----:|------------:|
-|   7 | **0.31** |    0.34 |   5.95 | 0.64 |         101 |
-|  31 | **0.53** |    4.73 |    OOM | 2.41 |          94 |
-|  63 | **0.56** |   18.64 |    OOM | 4.77 |          92 |
-| 127 | **0.53** |   70.24 |    OOM | 9.46 |          90 |
+|   7 |     0.30 |    0.42 |   2.80 | 0.20 |         159 |
+|  31 | **0.23** |    5.46 |  41.87 | 0.58 |         151 |
+|  63 | **0.31** |   21.48 |    OOM | 1.05 |         144 |
+| 127 | **0.25** |   81.03 |    OOM | 2.00 |         142 |
+
 
 ## Building from source
 
