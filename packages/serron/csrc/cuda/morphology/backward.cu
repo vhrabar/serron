@@ -6,6 +6,7 @@
 #include <cuda/morphology/separable.cuh>
 #include <cuda/utils/boundaries.cuh>
 #include <cuda/utils/declarations.cuh>
+#include <cuda/utils/smem.cuh>
 
 #include <cuda_runtime.h>
 
@@ -428,7 +429,7 @@ __global__ void morphology_col_argreduce_kernel(
  * output element versus @ref morphology_backward_kernel's O(kH*kW).
  */
 template <typename scalar_t, typename Op>
-void launch_morphology_backward_separable(const scalar_t* input, const scalar_t* grad_output, scalar_t* grad_input,
+bool launch_morphology_backward_separable(const scalar_t* input, const scalar_t* grad_output, scalar_t* grad_input,
                                           scalar_t* grad_kernel, scalar_t* row_best_val, int32_t* row_best_dj,
                                           int64_t N, int64_t C, int64_t H, int64_t W, int64_t kH, int64_t kW,
                                           int64_t kernel_channel_stride, BorderMode border, bool need_kernel_grad,
@@ -437,22 +438,31 @@ void launch_morphology_backward_separable(const scalar_t* input, const scalar_t*
     constexpr size_t kTap = sizeof(ArgTap<acc_t>);
 
     const dim3 block(LINE_TILE);
-    const size_t budget = at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock;
+    const size_t budget = smem_budget();
 
     const int64_t chunks_row = line_chunks_per_block(kW, W, kTap, budget);
+    const int64_t chunks_col = line_chunks_per_block(kH, H, kTap, budget);
+    const size_t smem_row = line_smem_bytes(chunks_row, kW, kTap);
+    const size_t smem_col = line_smem_bytes(chunks_col, kH, kTap);
+
+    if (!configure_kernel_smem(morphology_row_argreduce_kernel<scalar_t, Op>, smem_row) ||
+        !configure_kernel_smem(morphology_col_argreduce_kernel<scalar_t, Op>, smem_col)) {
+        return false;
+    }
+
     const int64_t out_row = chunks_row * kW - kW + 1;
     const dim3 grid_row(static_cast<unsigned int>((W + out_row - 1) / out_row), static_cast<unsigned int>(H),
                         static_cast<unsigned int>(N * C));
-    morphology_row_argreduce_kernel<scalar_t, Op><<<grid_row, block, line_smem_bytes(chunks_row, kW, kTap), stream>>>(
+    morphology_row_argreduce_kernel<scalar_t, Op><<<grid_row, block, smem_row, stream>>>(
         input, row_best_val, row_best_dj, H, W, kW, chunks_row, border);
 
-    const int64_t chunks_col = line_chunks_per_block(kH, H, kTap, budget);
     const int64_t out_col = chunks_col * kH - kH + 1;
     const dim3 grid_col(static_cast<unsigned int>((H + out_col - 1) / out_col), static_cast<unsigned int>(W),
                         static_cast<unsigned int>(N * C));
-    morphology_col_argreduce_kernel<scalar_t, Op><<<grid_col, block, line_smem_bytes(chunks_col, kH, kTap), stream>>>(
+    morphology_col_argreduce_kernel<scalar_t, Op><<<grid_col, block, smem_col, stream>>>(
         row_best_val, row_best_dj, grad_output, grad_input, grad_kernel, C, H, W, kH, kW, chunks_col,
         kernel_channel_stride, border, need_kernel_grad);
+    return true;
 }
 
 /**
@@ -471,11 +481,11 @@ void launch_morphology_backward(const scalar_t* grad_output, const scalar_t* inp
 
     // One scan chunk is the smallest tile a line pass can stage. If even that overflows the
     // budget, the kernels below take over no matter how separable the SE is.
-    const size_t budget = at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock;
-    if (use_separable && line_smem_bytes(1, std::max(kH, kW), sizeof(ArgTap<acc_t>)) <= budget) {
+    const size_t budget = smem_budget();
+    if (use_separable && line_smem_bytes(1, std::max(kH, kW), sizeof(ArgTap<acc_t>)) <= budget &&
         launch_morphology_backward_separable<scalar_t, Op>(input, grad_output, grad_input, grad_kernel, row_best_val,
                                                            row_best_dj, N, C, H, W, kH, kW, kernel_channel_stride,
-                                                           border, need_kernel_grad, stream);
+                                                           border, need_kernel_grad, stream)) {
         return;
     }
 
@@ -484,7 +494,7 @@ void launch_morphology_backward(const scalar_t* grad_output, const scalar_t* inp
     const size_t smem = (static_cast<size_t>(tile_h * tile_w) + static_cast<size_t>(kH * kW)) * sizeof(scalar_t);
 
     // Tile if it fits, element-wise otherwise
-    if (smem <= budget) {
+    if (smem <= budget && configure_kernel_smem(morphology_backward_tiled_kernel<scalar_t, Op>, smem)) {
         constexpr dim3 block(TILE_X, TILE_Y);
         const dim3 grid(static_cast<unsigned int>((W + TILE_X - 1) / TILE_X),
                         static_cast<unsigned int>((H + TILE_Y - 1) / TILE_Y), static_cast<unsigned int>(N * C));

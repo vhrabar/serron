@@ -6,6 +6,7 @@
 #include <cuda/morphology/separable.cuh>
 #include <cuda/utils/boundaries.cuh>
 #include <cuda/utils/declarations.cuh>
+#include <cuda/utils/smem.cuh>
 
 #include <cuda_runtime.h>
 
@@ -288,26 +289,33 @@ __global__ void morphology_line_kernel(const scalar_t* __restrict__ input, scala
  * @param stream   CUDA stream both passes are launched on.
  */
 template <typename scalar_t, typename Op>
-void launch_morphology_separable(const scalar_t* input, scalar_t* scratch, scalar_t* output, int64_t N, int64_t C,
+bool launch_morphology_separable(const scalar_t* input, scalar_t* scratch, scalar_t* output, int64_t N, int64_t C,
                                  int64_t H, int64_t W, int64_t kH, int64_t kW, BorderMode border, cudaStream_t stream) {
     const dim3 block(LINE_TILE);
-    const size_t budget = at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock;
+    const size_t budget = smem_budget();
 
     const int64_t chunks_row = line_chunks_per_block(kW, W, sizeof(scalar_t), budget);
+    const int64_t chunks_col = line_chunks_per_block(kH, H, sizeof(scalar_t), budget);
+    const size_t smem_row = line_smem_bytes(chunks_row, kW, sizeof(scalar_t));
+    const size_t smem_col = line_smem_bytes(chunks_col, kH, sizeof(scalar_t));
+
+    if (!configure_kernel_smem(morphology_line_kernel<scalar_t, Op, LineAxis::kRow>, smem_row) ||
+        !configure_kernel_smem(morphology_line_kernel<scalar_t, Op, LineAxis::kCol>, smem_col)) {
+        return false;
+    }
+
     const int64_t out_row = chunks_row * kW - kW + 1;
     const dim3 grid_row(static_cast<unsigned int>((W + out_row - 1) / out_row), static_cast<unsigned int>(H),
                         static_cast<unsigned int>(N * C));
     morphology_line_kernel<scalar_t, Op, LineAxis::kRow>
-        <<<grid_row, block, line_smem_bytes(chunks_row, kW, sizeof(scalar_t)), stream>>>(input, scratch, N, C, H, W, kW,
-                                                                                         chunks_row, border);
+        <<<grid_row, block, smem_row, stream>>>(input, scratch, N, C, H, W, kW, chunks_row, border);
 
-    const int64_t chunks_col = line_chunks_per_block(kH, H, sizeof(scalar_t), budget);
     const int64_t out_col = chunks_col * kH - kH + 1;
     const dim3 grid_col(static_cast<unsigned int>((H + out_col - 1) / out_col), static_cast<unsigned int>(W),
                         static_cast<unsigned int>(N * C));
     morphology_line_kernel<scalar_t, Op, LineAxis::kCol>
-        <<<grid_col, block, line_smem_bytes(chunks_col, kH, sizeof(scalar_t)), stream>>>(scratch, output, N, C, H, W,
-                                                                                         kH, chunks_col, border);
+        <<<grid_col, block, smem_col, stream>>>(scratch, output, N, C, H, W, kH, chunks_col, border);
+    return true;
 }
 
 /**
@@ -318,10 +326,10 @@ template <typename scalar_t, typename Op>
 void launch_morphology(const scalar_t* input, const scalar_t* kernel, scalar_t* output, scalar_t* scratch,
                        bool use_separable, int64_t N, int64_t C, int64_t H, int64_t W, int64_t kH, int64_t kW,
                        int64_t kernel_channel_stride, BorderMode border, cudaStream_t stream) {
-    const size_t budget = at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock;
+    const size_t budget = smem_budget();
 
-    if (use_separable && line_smem_bytes(1, std::max(kH, kW), sizeof(scalar_t)) <= budget) {
-        launch_morphology_separable<scalar_t, Op>(input, scratch, output, N, C, H, W, kH, kW, border, stream);
+    if (use_separable && line_smem_bytes(1, std::max(kH, kW), sizeof(scalar_t)) <= budget &&
+        launch_morphology_separable<scalar_t, Op>(input, scratch, output, N, C, H, W, kH, kW, border, stream)) {
         return;
     }
 
@@ -329,8 +337,8 @@ void launch_morphology(const scalar_t* input, const scalar_t* kernel, scalar_t* 
     const int64_t tile_h = TILE_Y + kH - 1;
     const size_t smem = (static_cast<size_t>(tile_h * tile_w) + static_cast<size_t>(kH * kW)) * sizeof(scalar_t);
 
-    // path selector -> based on smem budget
-    if (smem <= budget) {
+    // Tile if it fits, element-wise otherwise
+    if (smem <= budget && configure_kernel_smem(morphology_tiled_kernel<scalar_t, Op>, smem)) {
         constexpr dim3 block(TILE_X, TILE_Y);
         const dim3 grid(static_cast<unsigned int>((W + TILE_X - 1) / TILE_X),
                         static_cast<unsigned int>((H + TILE_Y - 1) / TILE_Y), static_cast<unsigned int>(N * C));
