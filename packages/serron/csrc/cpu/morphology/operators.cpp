@@ -2,6 +2,7 @@
 
 #include <cpu/morphology/enums.h>
 #include <cpu/morphology/ops_policy.h>
+#include <cpu/morphology/separable.h>
 #include <cpu/utils/boundaries.h>
 
 #include <ATen/AccumulateType.h>
@@ -9,7 +10,9 @@
 #include <ATen/Parallel.h>
 #include <c10/util/Exception.h>
 
+#include <algorithm>
 #include <cmath>
+#include <vector>
 
 namespace serron {
 
@@ -74,6 +77,110 @@ void morphology_cpu_kernel(const scalar_t* input, const scalar_t* kernel, scalar
     });
 }
 
+/// Which axis a separable line pass reduces over.
+enum class LineAxis : int { kRow = 0, kCol = 1 };
+
+/**
+ * Separable line-reduction pass (van Herk / Gil-Werman): every line of the chosen axis is
+ * materialised with its @c k-1 halo resolved per @p border, then scanned twice -- forward
+ * within blocks of @p k, backward within the same blocks. Each output window then falls out
+ * of a single pairwise reduce of the two scans, so the cost per output is independent of the
+ * window length. Requires a flat structuring element, whose taps leave the samples unchanged.
+ *
+ * @tparam scalar_t  Element type; the reduction accumulates in at::acc_type<scalar_t, false>.
+ * @tparam Op        Operation policy (@ref ErodeOp or @ref DilateOp); only @c neutral and @c reduce are used.
+ * @tparam Axis      @ref LineAxis::kRow reduces along W (contiguous); @ref LineAxis::kCol along H (stride W).
+ * @param input      Input image, contiguous (N, C, H, W).
+ * @param output     Output image, contiguous (N, C, H, W); written in full.
+ * @param N, C, H, W Batch / channel / spatial extents.
+ * @param k          Window length along @p Axis (kW for kRow, kH for kCol).
+ * @param border     Boundary mode (@ref BorderMode) for out-of-image reads.
+ */
+template <typename scalar_t, typename Op, LineAxis Axis>
+void morphology_line_cpu_kernel(const scalar_t* input, scalar_t* output, const int64_t N, const int64_t C,
+                                const int64_t H, const int64_t W, const int64_t k, const BorderMode border) {
+    using acc_t = at::acc_type<scalar_t, false>;
+
+    const int64_t line_len = (Axis == LineAxis::kRow) ? W : H;
+    const int64_t lines = (Axis == LineAxis::kRow) ? H : W;
+    const int64_t stride = (Axis == LineAxis::kRow) ? 1 : W;
+    const int64_t anchor = k / 2;
+    const int64_t span = line_len + k - 1;
+    const int64_t padded = (span + k - 1) / k * k;
+    const auto neutral = Op::template neutral<acc_t>();
+    const int64_t grain = std::max<int64_t>(1, at::internal::GRAIN_SIZE / std::max<int64_t>(line_len, 1));
+
+    at::parallel_for(0, N * C * lines, grain, [&](const int64_t begin, const int64_t end) {
+        // [span, padded) is never written, so it keeps the neutral element these start out with.
+        std::vector<acc_t> samples(static_cast<size_t>(padded), neutral);
+        std::vector<acc_t> prefix(static_cast<size_t>(padded), neutral);
+        std::vector<acc_t> suffix(static_cast<size_t>(padded), neutral);
+
+        for (int64_t idx = begin; idx < end; ++idx) {
+            const int64_t line = idx % lines;
+            const int64_t nc = idx / lines;
+            const scalar_t* input_nc = input + nc * H * W;
+            scalar_t* output_nc = output + nc * H * W;
+            const int64_t line_off = (Axis == LineAxis::kRow) ? line * W : line;
+
+            for (int64_t t = 0; t < span; ++t) {
+                int64_t pos = t - anchor;
+                samples[t] = resolve_coord(pos, line_len, border)
+                                 ? static_cast<acc_t>(input_nc[line_off + pos * stride])
+                                 : neutral;
+            }
+
+            for (int64_t t = 0; t < padded; ++t) {
+                prefix[t] = (t % k == 0) ? samples[t] : Op::reduce(prefix[t - 1], samples[t]);
+            }
+            for (int64_t t = padded - 1; t >= 0; --t) {
+                suffix[t] = (t % k == k - 1) ? samples[t] : Op::reduce(suffix[t + 1], samples[t]);
+            }
+
+            for (int64_t out_pos = 0; out_pos < line_len; ++out_pos) {
+                const acc_t acc = Op::reduce(suffix[out_pos], prefix[out_pos + k - 1]);
+                output_nc[line_off + out_pos * stride] = static_cast<scalar_t>(acc);
+            }
+        }
+    });
+}
+
+/**
+ * Chains the row pass (@p input -> @p scratch) into the column pass (@p scratch -> @p output).
+ * Requires the structuring element to be flat and axis-separable.
+ *
+ * @param input    Input image, contiguous (N, C, H, W).
+ * @param scratch  Intermediate buffer, same shape/dtype as @p input; holds the row-pass result.
+ * @param output   Output image, contiguous (N, C, H, W).
+ * @param N, C, H, W  Batch / channel / spatial extents.
+ * @param kH       Structuring-element height (window length for the column pass).
+ * @param kW       Structuring-element width (window length for the row pass).
+ * @param border   Boundary mode (@ref BorderMode) for out-of-image reads.
+ */
+template <typename scalar_t, typename Op>
+void morphology_separable_cpu(const scalar_t* input, scalar_t* scratch, scalar_t* output, const int64_t N,
+                              const int64_t C, const int64_t H, const int64_t W, const int64_t kH, const int64_t kW,
+                              const BorderMode border) {
+    morphology_line_cpu_kernel<scalar_t, Op, LineAxis::kRow>(input, scratch, N, C, H, W, kW, border);
+    morphology_line_cpu_kernel<scalar_t, Op, LineAxis::kCol>(scratch, output, N, C, H, W, kH, border);
+}
+
+/**
+ * Run the morphology forward pass: the separable row+column reduction when @p use_separable was
+ * set by the caller (flat, axis-separable SE at/above @ref separable_min_k), otherwise the direct
+ * 2-D window, as @ref morphology_cpu_kernel.
+ */
+template <typename scalar_t, typename Op>
+void morphology_cpu(const scalar_t* input, const scalar_t* kernel, scalar_t* output, scalar_t* scratch,
+                    const bool use_separable, const int64_t N, const int64_t C, const int64_t H, const int64_t W,
+                    const int64_t kH, const int64_t kW, const int64_t kernel_channel_stride, const BorderMode border) {
+    if (use_separable) {
+        morphology_separable_cpu<scalar_t, Op>(input, scratch, output, N, C, H, W, kH, kW, border);
+        return;
+    }
+    morphology_cpu_kernel<scalar_t, Op>(input, kernel, output, N, C, H, W, kH, kW, kernel_channel_stride, border);
+}
+
 /**
  * Shared host-side implementation behind @ref erode_cpu / @ref dilate_cpu: validates the inputs, normalises the
  * structuring-element layout, then dispatches on dtype and @p op to @ref morphology_cpu_kernel.
@@ -87,8 +194,8 @@ void morphology_cpu_kernel(const scalar_t* input, const scalar_t* kernel, scalar
  * @throws c10::Error  if the tensors are not on CPU, have the wrong rank or dtype, the channel counts disagree, or @p
  * border is out of range.
  */
-at::Tensor morphology_impl(const at::Tensor& input, const at::Tensor& kernel, int64_t border, MorphOp op,
-                           const char* name) {
+at::Tensor morphology_impl(const at::Tensor& input, const at::Tensor& kernel, int64_t border,
+                           const std::optional<bool>& flat, MorphOp op, const char* name) {
     TORCH_CHECK(input.is_cpu(), name, ": input must be a CPU tensor");
     TORCH_CHECK(kernel.is_cpu(), name, ": kernel must be a CPU tensor");
     TORCH_CHECK(input.dim() == 4, name, ": input must be 4-D (N, C, H, W), got ", input.dim(), "-D");
@@ -125,20 +232,27 @@ at::Tensor morphology_impl(const at::Tensor& input, const at::Tensor& kernel, in
     if (output.numel() == 0)
         return output;
 
+    const bool use_separable = use_separable_path(resolve_flat(flat, kernel_c), kH, kW);
+    at::Tensor scratch;
+    if (use_separable) {
+        scratch = at::empty_like(input_c);
+    }
+
     const auto border_mode = static_cast<BorderMode>(border);
 
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half, at::ScalarType::BFloat16, input_c.scalar_type(), "serron_morphology_cpu", [&] {
+            scalar_t* scratch_ptr = use_separable ? scratch.data_ptr<scalar_t>() : nullptr;
             switch (op) {
             case MorphOp::kErode:
-                morphology_cpu_kernel<scalar_t, ErodeOp>(input_c.data_ptr<scalar_t>(), kernel_c.data_ptr<scalar_t>(),
-                                                         output.data_ptr<scalar_t>(), N, C, H, W, kH, kW,
-                                                         kernel_channel_stride, border_mode);
+                morphology_cpu<scalar_t, ErodeOp>(input_c.data_ptr<scalar_t>(), kernel_c.data_ptr<scalar_t>(),
+                                                  output.data_ptr<scalar_t>(), scratch_ptr, use_separable, N, C, H, W,
+                                                  kH, kW, kernel_channel_stride, border_mode);
                 break;
             case MorphOp::kDilate:
-                morphology_cpu_kernel<scalar_t, DilateOp>(input_c.data_ptr<scalar_t>(), kernel_c.data_ptr<scalar_t>(),
-                                                          output.data_ptr<scalar_t>(), N, C, H, W, kH, kW,
-                                                          kernel_channel_stride, border_mode);
+                morphology_cpu<scalar_t, DilateOp>(input_c.data_ptr<scalar_t>(), kernel_c.data_ptr<scalar_t>(),
+                                                   output.data_ptr<scalar_t>(), scratch_ptr, use_separable, N, C, H, W,
+                                                   kH, kW, kernel_channel_stride, border_mode);
                 break;
             }
         });
@@ -157,8 +271,9 @@ at::Tensor morphology_impl(const at::Tensor& input, const at::Tensor& kernel, in
  * @param border        Boundary mode (@ref BorderMode) applied at the image edges.
  * @return              Eroded tensor, same shape and dtype as @p input.
  */
-at::Tensor erode_cpu(const at::Tensor& input, const at::Tensor& kernel, const int64_t border) {
-    return morphology_impl(input, kernel, border, MorphOp::kErode, "serron::erode");
+at::Tensor erode_cpu(const at::Tensor& input, const at::Tensor& kernel, const int64_t border,
+                     const std::optional<bool>& flat) {
+    return morphology_impl(input, kernel, border, flat, MorphOp::kErode, "serron::erode");
 }
 
 /**
@@ -170,8 +285,9 @@ at::Tensor erode_cpu(const at::Tensor& input, const at::Tensor& kernel, const in
  * @param border        Boundary mode (@ref BorderMode) applied at the image edges.
  * @return              Dilated tensor, same shape and dtype as @p input.
  */
-at::Tensor dilate_cpu(const at::Tensor& input, const at::Tensor& kernel, const int64_t border) {
-    return morphology_impl(input, kernel, border, MorphOp::kDilate, "serron::dilate");
+at::Tensor dilate_cpu(const at::Tensor& input, const at::Tensor& kernel, const int64_t border,
+                      const std::optional<bool>& flat) {
+    return morphology_impl(input, kernel, border, flat, MorphOp::kDilate, "serron::dilate");
 }
 
 } // namespace serron

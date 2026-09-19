@@ -134,3 +134,77 @@ def test_cpu_cuda_backward_parity(op: str, wrt: str, rng: torch.Generator) -> No
         return grad.cpu()
 
     torch.testing.assert_close(grads("cuda"), grads("cpu"))
+
+
+@pytest.mark.parametrize("op", PRIMITIVES)
+@pytest.mark.parametrize("ksize", [3, 21], ids=["direct", "separable"])
+def test_grad_input_unaffected_by_se_requiring_grad(op: str, ksize: int, device: torch.device, rng: torch.Generator) -> None:
+    """The backward skips the grad_kernel scatter for a fixed SE; grad_input must not move."""
+    base = make_image(rng, (1, 2, 12, 14), device=device)
+    kernel = torch.zeros(ksize, ksize, dtype=base.dtype, device=device)
+
+    fixed_x = base.clone().requires_grad_(True)
+    getattr(serron, op)(fixed_x, kernel).sum().backward()
+
+    learned_x = base.clone().requires_grad_(True)
+    learned_k = kernel.clone().requires_grad_(True)
+    getattr(serron, op)(learned_x, learned_k).sum().backward()
+
+    assert fixed_x.grad is not None and learned_x.grad is not None
+    assert torch.equal(fixed_x.grad, learned_x.grad)
+    assert learned_k.grad is not None
+
+
+@pytest.mark.parametrize("op", PRIMITIVES)
+def test_no_gradient_requested_returns_nothing(op: str, device: torch.device, rng: torch.Generator) -> None:
+    """With neither input requiring grad the op produces no graph at all."""
+    x = make_image(rng, (1, 2, 8, 9), device=device)
+    kernel = torch.zeros(3, 3, dtype=x.dtype, device=device)
+
+    out = getattr(serron, op)(x, kernel)
+
+    assert out.grad_fn is None
+    assert not out.requires_grad
+
+
+@pytest.mark.parametrize("op", PRIMITIVES)
+@pytest.mark.parametrize("ksize", [3, 21], ids=["direct", "separable"])
+def test_tie_break_keeps_the_lowest_offset(op: str, ksize: int, device: torch.device) -> None:
+    """On a constant image every tap in the window ties, so the winner is decided purely by
+    the tie-break rule. The kernels keep the lowest ``(di, dj)``, which puts the gradient at
+    each window's top-left corner
+    """
+    shape = (1, 1, 9, 10)
+    anchor = ksize // 2
+    x = torch.full(shape, 2.5, dtype=torch.float64, device=device, requires_grad=True)
+    kernel = torch.zeros(ksize, ksize, dtype=torch.float64, device=device)
+
+    getattr(serron, op)(x, kernel, border=BorderMode.REPLICATE).sum().backward()
+
+    expected = torch.zeros(shape, dtype=torch.float64, device=device)
+    for h in range(shape[2]):
+        for w in range(shape[3]):
+            ih = min(max(h - anchor, 0), shape[2] - 1)
+            iw = min(max(w - anchor, 0), shape[3] - 1)
+            expected[:, :, ih, iw] += 1.0
+
+    assert x.grad is not None
+    assert torch.equal(x.grad, expected)
+
+
+@requires_cuda
+@pytest.mark.parametrize("op", PRIMITIVES)
+@pytest.mark.parametrize("ksize", [3, 21], ids=["direct", "separable"])
+def test_tie_break_matches_across_devices(op: str, ksize: int, rng: torch.Generator) -> None:
+    """A coarsely quantised image ties often; both backends must resolve those the same way."""
+    quantised = (make_image(rng, (1, 2, 16, 18), device="cpu") * 2).round()
+
+    grads = []
+    for device in ("cpu", "cuda"):
+        x = quantised.clone().to(device).requires_grad_(True)
+        kernel = torch.zeros(ksize, ksize, dtype=x.dtype, device=device)
+        getattr(serron, op)(x, kernel).sum().backward()
+        assert x.grad is not None
+        grads.append(x.grad.cpu())
+
+    assert torch.equal(grads[0], grads[1])

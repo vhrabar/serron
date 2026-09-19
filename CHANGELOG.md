@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Separable van Herk–Gil–Werman path for `erode`/`dilate` on CUDA and CPU, forward and backward, so a flat,
+    axis-separable structuring element costs O(1) per output in the window length instead of O(kH × kW). A flat SE
+    splits into a `1 × kW` row pass and a `kH × 1` column pass; each line is then scanned forward and backward in
+    chunks of `k`, so every output window straddles exactly one chunk boundary and resolves in a single combine. (#34).
+- Backward support on the separable path: its scans carry a `(value, offset)` pair rather than a bare value, since the
+    gradient needs the winning sample's position and not only its value. Ties keep the lowest offset, the same rule the
+    direct kernel gets from its strict-improvement loop, so both paths route the gradient to the same tap (#34).
+- Tiled backward kernel for the non-separable case, staging its halo tile and the structuring element in shared memory
+    so an input sample is read once per block rather than once per window it falls in. The element-wise kernel remains
+    the fallback when the tile does not fit (#34).
+
+### Changed
+
+- Structuring-element flatness is now cached instead of measured on every call, which removes a per-call device-to-host
+    sync from the path selection and makes `erosion` and `dilation` capturable in a CUDA graph.  (#34).
+- CUDA kernels now opt into the device's full dynamic shared-memory limit rather than using the default one,
+    so the tiled and separable paths reach further before handing off. (#34).
+
 ## [0.3.1] - 2026-08-31
 
 ### Fixed

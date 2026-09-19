@@ -14,6 +14,7 @@ Mathematical Morphology module for PyTorch (CUDA), providing differentiable oper
 This is an [uv](https://docs.astral.sh/uv/) workspace:
 
 - `packages/serron` - the published kernel package ([README](packages/serron/README.md)).
+- `benchmarks` - throughput and cross-library benchmarks ([results](benchmarks/README.md)).
 
 ## Install
 
@@ -103,6 +104,65 @@ y.sum().backward()  # gradients flow into layer.weight
 ```
 
 Available layers: `Erosion2d`, `Dilation2d`, `Opening2d`, `Closing2d`.
+
+
+## Implementation
+
+Every operator picks one of a few kernels at call time. The structuring element and the
+device's shared memory decide which one.
+
+### Which path runs
+
+
+
+| Path                          | Runs when                                                     | Cost per output           |
+|-------------------------------|---------------------------------------------------------------|---------------------------|
+| Separable van Herk–Gil–Werman | Flat SE and `max(kH, kW) >= SERRON_SEPARABLE_MIN_K`           | O(1) in the window length |
+| Tiled 2-D                     | Otherwise, when the halo tile and the SE fit in shared memory | O(kH × kW)                |
+| Element-wise                  | Otherwise; reads through global memory (CUDA only)            | O(kH × kW)                |
+
+`SERRON_SEPARABLE_MIN_K` is the window length where the separable path takes over. It
+accepts any positive integer. The default differs per backend because it marks where the
+separable path starts beating the 2-D one, and that point is not the same on both: `11` on
+CUDA, `5` on CPU, where there is no tiled 2-D kernel to soften the `kH × kW` window.
+
+### The separable path
+
+Splitting a flat `kH × kW` window into a `1 × kW` row pass and a `kH × 1` column pass
+already drops the per-pixel work from `kH × kW` to `kH + kW`, and the Van Herk–Gil–Werman algorithm
+drops it further to a constant three operations per ouput, no matter the sequence length.
+
+On CUDA both scans sit in shared memory. A chunk at least a warp wide gets a warp to
+itself and the lanes cooperate through shuffles; anything shorter gets a single thread.
+On CPU the lines go through `at::parallel_for`.
+
+### Backward
+
+Backward needs to know *where* the winning sample was, not just what it was, so its scans
+carry a `(value, offset)` pair rather than a bare value. Combining two of those keeps the
+lower offset on a tie, which is the rule the direct kernel gets from its strict-improvement
+loop — reproducing it exactly is what makes the two paths agree on which tap receives the
+gradient. The window is one pair-combine as before, so the search is O(1) in the window
+length on both the row and the column pass.
+
+It splits on the same condition: a separable row and column argreduce for a flat SE at or
+above the threshold, and a direct recompute of the winning tap otherwise. The direct
+recompute stages its window in shared memory the same way the forward's tiled path does.
+
+
+## Benchmarks
+
+Per-operator throughput and the cross-library comparison live in
+[`benchmarks/README.md`](https://github.com/vhrabar/serron/blob/main/benchmarks/README.md).
+
+Erosion with a flat SE, `8x3x512x512` float32 on an H100 PCIe (with Intel Xeon Platinum 8480+), in milliseconds:
+
+|   k |   serron | PyTorch | Kornia | CuPy | SciPy (CPU) |
+|----:|---------:|--------:|-------:|-----:|------------:|
+|   7 |     0.30 |    0.42 |   2.80 | 0.20 |         159 |
+|  31 | **0.23** |    5.46 |  41.87 | 0.58 |         151 |
+|  63 | **0.31** |   21.48 |    OOM | 1.05 |         144 |
+| 127 | **0.25** |   81.03 |    OOM | 2.00 |         142 |
 
 
 ## Building from source
