@@ -24,7 +24,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      pull-requests: write
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      skip: ${{ steps.gate.outputs.skip }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -124,13 +126,29 @@ jobs:
             echo "$(gh release view "$TAG" --json url --jq .url)"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Sync the release commit back to dev
-        if: steps.gate.outputs.skip != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          TAG: ${{ steps.version.outputs.tag }}
+  sync-back:
+    needs: release
+    if: needs.release.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Open the sync PR into dev
         run: |
           set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           git fetch origin dev:refs/remotes/origin/dev
           BRANCH="sync-main-${TAG}"
           git checkout -b "$BRANCH" origin/dev
