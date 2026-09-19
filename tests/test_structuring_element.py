@@ -154,29 +154,3 @@ def test_flat_se_behaves_like_masked_min_max() -> None:
 
     torch.testing.assert_close(ero, ref_ero)
     torch.testing.assert_close(dil, ref_dil)
-
-
-@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32, torch.float64])
-def test_builders_honour_dtype(dtype: torch.dtype) -> None:
-    assert se.square(5, dtype=dtype).dtype == dtype
-    assert se.cross(5, dtype=dtype).dtype == dtype
-    assert se.disk(2, dtype=dtype).dtype == dtype
-    assert se.diamond(2, dtype=dtype).dtype == dtype
-    assert se.from_tensor(torch.zeros(3, 3), dtype=dtype).dtype == dtype
-
-
-@pytest.mark.parametrize(
-    "builder", [lambda **kw: se.square(5, **kw), lambda **kw: se.cross(5, **kw), lambda **kw: se.disk(2, **kw)]
-)
-def test_non_floating_dtype_rejected(builder: Callable[..., torch.Tensor]) -> None:
-    with pytest.raises(ValueError, match="floating dtype"):
-        builder(dtype=torch.int32)
-
-
-@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
-def test_matching_se_dtype_keeps_the_output_narrow(dtype: torch.dtype) -> None:
-    """A float32 SE promotes a half-precision input; one built at the input's dtype does not."""
-    x = torch.randn(1, 1, 12, 12, dtype=dtype, device=PREFERRED_DEVICE)
-
-    assert serron.dilation(x, se.square(3, device=PREFERRED_DEVICE)).dtype == torch.float32
-    assert serron.dilation(x, se.square(3, dtype=dtype, device=PREFERRED_DEVICE)).dtype == dtype

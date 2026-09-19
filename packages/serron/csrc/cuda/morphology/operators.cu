@@ -2,11 +2,8 @@
 
 #include <cuda/morphology/enums.cuh>
 #include <cuda/morphology/ops_policy.cuh>
-#include <cuda/morphology/scan.cuh>
-#include <cuda/morphology/separable.cuh>
 #include <cuda/utils/boundaries.cuh>
 #include <cuda/utils/declarations.cuh>
-#include <cuda/utils/smem.cuh>
 
 #include <cuda_runtime.h>
 
@@ -182,163 +179,23 @@ __global__ void morphology_tiled_kernel(const scalar_t* __restrict__ input, cons
     output[nc * H * W + out_y * W + out_x] = static_cast<scalar_t>(acc);
 }
 
-/// Which axis a separable line pass reduces over.
-enum class LineAxis : int { kRow = 0, kCol = 1 };
-
-/**
- * Separable line-reduction kernel (van Herk / Gil-Werman)
- *
- * @tparam scalar_t  Element type; the reduction accumulates in at::acc_type<scalar_t>.
- * @tparam Op        Operation policy (@ref ErodeOp or @ref DilateOp); only @c neutral and
- * @c reduce are used.
- * @tparam Axis      @ref LineAxis::kRow reduces along W (contiguous); @ref LineAxis::kCol
- * along H (stride W).
- * @param input      Input image, contiguous (N, C, H, W).
- * @param output     Output image, contiguous (N, C, H, W); written in full.
- * @param N          Batch size.
- * @param C          Channel count.
- * @param H          Input/output height.
- * @param W          Input/output width.
- * @param k          Window length along @p Axis (kW for kRow, kH for kCol).
- * @param chunks     Scan windows of @p k samples per block (@ref line_chunks_per_block).
- * @param border     Boundary mode (@ref BorderMode) for out-of-image reads.
- */
-template <typename scalar_t, typename Op, LineAxis Axis>
-__global__ void morphology_line_kernel(const scalar_t* __restrict__ input, scalar_t* __restrict__ output,
-                                       const int64_t N, const int64_t C, const int64_t H, const int64_t W,
-                                       const int64_t k, const int64_t chunks, const BorderMode border) {
-    using acc_t = at::acc_type<scalar_t, true>;
-
-    const int64_t line_len = (Axis == LineAxis::kRow) ? W : H;
-    const int64_t anchor = k / 2;
-    const int64_t tile_len = chunks * k;
-    const int64_t out_count = tile_len - k + 1;
-
-    extern __shared__ __align__(sizeof(double)) unsigned char smem_raw[];
-    auto* s_forward = reinterpret_cast<scalar_t*>(smem_raw);
-    scalar_t* s_backward = s_forward + tile_len;
-
-    const int64_t line = blockIdx.y;
-    const int64_t nc = blockIdx.z;
-    const scalar_t* input_nc = input + nc * H * W;
-    scalar_t* output_nc = output + nc * H * W;
-
-    const int64_t tile0 = static_cast<int64_t>(blockIdx.x) * out_count;
-    const auto neutral = static_cast<scalar_t>(Op::template neutral<acc_t>());
-
-    // Consecutive threads take consecutive samples
-    for (int64_t t = threadIdx.x; t < tile_len; t += LINE_TILE) {
-        int64_t pos = tile0 + t - anchor;
-        const bool valid = resolve_coord(pos, line_len, border);
-        scalar_t v = neutral;
-        if (valid) {
-            if constexpr (Axis == LineAxis::kRow) {
-                v = input_nc[line * W + pos];
-            } else {
-                v = input_nc[pos * W + line];
-            }
-        }
-        s_forward[t] = v;
-        s_backward[t] = v;
-    }
-    __syncthreads();
-
-    // each scan reads its s own chuck
-    if (k < WARP_SIZE) {
-        for (int64_t chunk = threadIdx.x; chunk < chunks; chunk += LINE_TILE) {
-            scan_chunk_serial<Op, scalar_t, true>(s_forward + chunk * k, k);
-            scan_chunk_serial<Op, scalar_t, false>(s_backward + chunk * k, k);
-        }
-    } else {
-        const unsigned lane = threadIdx.x % WARP_SIZE;
-        for (int64_t chunk = threadIdx.x / WARP_SIZE; chunk < chunks; chunk += LINE_WARPS) {
-            scan_chunk_warp<Op, scalar_t, true>(s_forward + chunk * k, k, lane);
-            scan_chunk_warp<Op, scalar_t, false>(s_backward + chunk * k, k, lane);
-        }
-    }
-    __syncthreads();
-
-    for (int64_t i = threadIdx.x; i < out_count; i += LINE_TILE) {
-        const int64_t out_pos = tile0 + i;
-        if (out_pos >= line_len)
-            break;
-
-        const acc_t acc = Op::reduce(static_cast<acc_t>(s_backward[i]), static_cast<acc_t>(s_forward[i + k - 1]));
-        if constexpr (Axis == LineAxis::kRow) {
-            output_nc[line * W + out_pos] = static_cast<scalar_t>(acc);
-        } else {
-            output_nc[out_pos * W + line] = static_cast<scalar_t>(acc);
-        }
-    }
-}
-
-/**
- * Chains the row pass (@p input -> @p scratch) into the column pass (@p scratch ->
- * @p output). Requires the structuring element to be flat and axis-separable
- *
- * @param input    Input image, contiguous (N, C, H, W).
- * @param scratch  Intermediate buffer, same shape/dtype as @p input; holds the row-pass result.
- * @param output   Output image, contiguous (N, C, H, W).
- * @param N        Batch size.
- * @param C        Channel count.
- * @param H        Input/output height.
- * @param W        Input/output width.
- * @param kH       Structuring-element height (window length for the column pass).
- * @param kW       Structuring-element width (window length for the row pass).
- * @param border   Boundary mode (@ref BorderMode) for out-of-image reads.
- * @param stream   CUDA stream both passes are launched on.
- */
-template <typename scalar_t, typename Op>
-bool launch_morphology_separable(const scalar_t* input, scalar_t* scratch, scalar_t* output, int64_t N, int64_t C,
-                                 int64_t H, int64_t W, int64_t kH, int64_t kW, BorderMode border, cudaStream_t stream) {
-    const dim3 block(LINE_TILE);
-    const size_t budget = smem_budget();
-
-    const int64_t chunks_row = line_chunks_per_block(kW, W, sizeof(scalar_t), budget);
-    const int64_t chunks_col = line_chunks_per_block(kH, H, sizeof(scalar_t), budget);
-    const size_t smem_row = line_smem_bytes(chunks_row, kW, sizeof(scalar_t));
-    const size_t smem_col = line_smem_bytes(chunks_col, kH, sizeof(scalar_t));
-
-    if (!configure_kernel_smem(morphology_line_kernel<scalar_t, Op, LineAxis::kRow>, smem_row) ||
-        !configure_kernel_smem(morphology_line_kernel<scalar_t, Op, LineAxis::kCol>, smem_col)) {
-        return false;
-    }
-
-    const int64_t out_row = chunks_row * kW - kW + 1;
-    const dim3 grid_row(static_cast<unsigned int>((W + out_row - 1) / out_row), static_cast<unsigned int>(H),
-                        static_cast<unsigned int>(N * C));
-    morphology_line_kernel<scalar_t, Op, LineAxis::kRow>
-        <<<grid_row, block, smem_row, stream>>>(input, scratch, N, C, H, W, kW, chunks_row, border);
-
-    const int64_t out_col = chunks_col * kH - kH + 1;
-    const dim3 grid_col(static_cast<unsigned int>((H + out_col - 1) / out_col), static_cast<unsigned int>(W),
-                        static_cast<unsigned int>(N * C));
-    morphology_line_kernel<scalar_t, Op, LineAxis::kCol>
-        <<<grid_col, block, smem_col, stream>>>(scratch, output, N, C, H, W, kH, chunks_col, border);
-    return true;
-}
-
 /**
  * Launch the morphology forward pass on @p stream.
  *
+ * Uses the fast SMEM tiled kernel when its halo tile plus the structuring element
+ * fits in the device's per-block dynamic shared-memory budget, otherwise falls back to
+ * the slower GMEM kernel.
  */
 template <typename scalar_t, typename Op>
-void launch_morphology(const scalar_t* input, const scalar_t* kernel, scalar_t* output, scalar_t* scratch,
-                       bool use_separable, int64_t N, int64_t C, int64_t H, int64_t W, int64_t kH, int64_t kW,
-                       int64_t kernel_channel_stride, BorderMode border, cudaStream_t stream) {
-    const size_t budget = smem_budget();
-
-    if (use_separable && line_smem_bytes(1, std::max(kH, kW), sizeof(scalar_t)) <= budget &&
-        launch_morphology_separable<scalar_t, Op>(input, scratch, output, N, C, H, W, kH, kW, border, stream)) {
-        return;
-    }
-
+void launch_morphology(const scalar_t* input, const scalar_t* kernel, scalar_t* output, int64_t N, int64_t C, int64_t H,
+                       int64_t W, int64_t kH, int64_t kW, int64_t kernel_channel_stride, BorderMode border,
+                       cudaStream_t stream) {
     const int64_t tile_w = TILE_X + kW - 1;
     const int64_t tile_h = TILE_Y + kH - 1;
     const size_t smem = (static_cast<size_t>(tile_h * tile_w) + static_cast<size_t>(kH * kW)) * sizeof(scalar_t);
 
-    // Tile if it fits, element-wise otherwise
-    if (smem <= budget && configure_kernel_smem(morphology_tiled_kernel<scalar_t, Op>, smem)) {
+    // path selector -> based on smem budget
+    if (smem <= at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock) {
         constexpr dim3 block(TILE_X, TILE_Y);
         const dim3 grid(static_cast<unsigned int>((W + TILE_X - 1) / TILE_X),
                         static_cast<unsigned int>((H + TILE_Y - 1) / TILE_Y), static_cast<unsigned int>(N * C));
@@ -366,8 +223,8 @@ void launch_morphology(const scalar_t* input, const scalar_t* kernel, scalar_t* 
  * @throws c10::Error   if the tensors are not on CUDA, have the wrong rank or dtype, the channel counts disagree, or @p
  * border is out of range.
  */
-at::Tensor morphology_impl(const at::Tensor& input, const at::Tensor& kernel, int64_t border,
-                           const std::optional<bool>& flat, MorphOp op, const char* name) {
+at::Tensor morphology_impl(const at::Tensor& input, const at::Tensor& kernel, int64_t border, MorphOp op,
+                           const char* name) {
     TORCH_CHECK(input.is_cuda(), name, ": input must be a CUDA tensor");
     TORCH_CHECK(kernel.is_cuda(), name, ": kernel must be a CUDA tensor");
     TORCH_CHECK(input.dim() == 4, name, ": input must be 4-D (N, C, H, W), got ", input.dim(), "-D");
@@ -404,29 +261,22 @@ at::Tensor morphology_impl(const at::Tensor& input, const at::Tensor& kernel, in
     if (output.numel() == 0)
         return output;
 
-    const bool use_separable = use_separable_path(resolve_flat(flat, kernel_c), kH, kW);
-    at::Tensor scratch;
-    if (use_separable) {
-        scratch = at::empty_like(input_c);
-    }
-
     const c10::cuda::CUDAGuard device_guard(input_c.device());
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
     const auto border_mode = static_cast<BorderMode>(border);
 
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half, at::ScalarType::BFloat16, input_c.scalar_type(), "serron_morphology", [&] {
-            scalar_t* scratch_ptr = use_separable ? scratch.data_ptr<scalar_t>() : nullptr;
             switch (op) {
             case MorphOp::kErode:
                 launch_morphology<scalar_t, ErodeOp>(input_c.data_ptr<scalar_t>(), kernel_c.data_ptr<scalar_t>(),
-                                                     output.data_ptr<scalar_t>(), scratch_ptr, use_separable, N, C, H,
-                                                     W, kH, kW, kernel_channel_stride, border_mode, stream);
+                                                     output.data_ptr<scalar_t>(), N, C, H, W, kH, kW,
+                                                     kernel_channel_stride, border_mode, stream);
                 break;
             case MorphOp::kDilate:
                 launch_morphology<scalar_t, DilateOp>(input_c.data_ptr<scalar_t>(), kernel_c.data_ptr<scalar_t>(),
-                                                      output.data_ptr<scalar_t>(), scratch_ptr, use_separable, N, C, H,
-                                                      W, kH, kW, kernel_channel_stride, border_mode, stream);
+                                                      output.data_ptr<scalar_t>(), N, C, H, W, kH, kW,
+                                                      kernel_channel_stride, border_mode, stream);
                 break;
             }
         });
@@ -448,9 +298,8 @@ at::Tensor morphology_impl(const at::Tensor& input, const at::Tensor& kernel, in
  * @throws c10::Error   if the tensors are not on CUDA, have the wrong rank or dtype, the channel counts disagree, or @p
  * border is out of range.
  */
-at::Tensor erode(const at::Tensor& input, const at::Tensor& kernel, const int64_t border,
-                 const std::optional<bool>& flat) {
-    return morphology_impl(input, kernel, border, flat, MorphOp::kErode, "serron::erode");
+at::Tensor erode(const at::Tensor& input, const at::Tensor& kernel, const int64_t border) {
+    return morphology_impl(input, kernel, border, MorphOp::kErode, "serron::erode");
 }
 
 /**
@@ -464,9 +313,8 @@ at::Tensor erode(const at::Tensor& input, const at::Tensor& kernel, const int64_
  * @throws c10::Error   if the tensors are not on CUDA, have the wrong rank or dtype, the channel counts disagree, or @p
  * border is out of range.
  */
-at::Tensor dilate(const at::Tensor& input, const at::Tensor& kernel, const int64_t border,
-                  const std::optional<bool>& flat) {
-    return morphology_impl(input, kernel, border, flat, MorphOp::kDilate, "serron::dilate");
+at::Tensor dilate(const at::Tensor& input, const at::Tensor& kernel, const int64_t border) {
+    return morphology_impl(input, kernel, border, MorphOp::kDilate, "serron::dilate");
 }
 
 } // namespace serron

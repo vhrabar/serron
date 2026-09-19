@@ -23,9 +23,7 @@ SHAPES = [
     (8, 3, 512, 512),
     (16, 3, 1024, 1024),
 ]
-KERNEL_SIZES = [3, 7, 15, 31, 63]
-BACKWARD_KERNEL_SIZES = [7, 31]
-SE_KIND_KSIZE = 31
+KERNEL_SIZES = [3, 7, 15]
 OPS = ["erosion", "dilation", "opening", "closing", "gradient", "top_hat", "black_hat"]
 DTYPES = {"fp32": torch.float32, "fp16": torch.float16, "bf16": torch.bfloat16}
 SE_KINDS = ["flat", "grayscale"]
@@ -85,11 +83,10 @@ def test_forward_throughput(benchmark: Any, op: str, shape: tuple[int, int, int,
     benchmark(run)
 
 
-@pytest.mark.parametrize("ksize", BACKWARD_KERNEL_SIZES, ids=lambda k: f"k{k}")
 @pytest.mark.parametrize("shape", SHAPES[:2], ids=_shape_id)
 @pytest.mark.parametrize("op", OPS)
-def test_forward_backward_throughput(benchmark: Any, op: str, shape: tuple[int, int, int, int], ksize: int) -> None:
-    x, kernel = _make(shape, ksize)
+def test_forward_backward_throughput(benchmark: Any, op: str, shape: tuple[int, int, int, int]) -> None:
+    x, kernel = _make(shape, ksize=7)
     x = x.requires_grad_(True)
     kernel = kernel.requires_grad_(True)
     func = getattr(serron.functional, op)
@@ -122,7 +119,7 @@ def test_dtype_forward_throughput(benchmark: Any, op: str, dtype_name: str) -> N
 @pytest.mark.parametrize("se_kind", SE_KINDS)
 @pytest.mark.parametrize("op", ["erosion", "dilation"])
 def test_se_kind_forward_throughput(benchmark: Any, op: str, se_kind: str) -> None:
-    x, kernel = _make((8, 3, 512, 512), SE_KIND_KSIZE, se_kind=se_kind)
+    x, kernel = _make((8, 3, 512, 512), 15, se_kind=se_kind)
     func = getattr(serron.functional, op)
 
     def run() -> Any:

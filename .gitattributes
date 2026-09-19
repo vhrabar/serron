@@ -3,6 +3,3 @@
 *.cpp text eol=lf
 *.cuh text eol=lf
 *.hpp text eol=lf
-
-benchmarks/** -linguist-detectable
-tests/** -linguist-detectable
