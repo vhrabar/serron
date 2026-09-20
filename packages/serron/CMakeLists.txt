@@ -85,7 +85,28 @@ if(SERRON_CUDA)
     )
 endif()
 
-Python_add_library(_C MODULE WITH_SOABI ${_serron_sources})
+set(_serron_headers
+        csrc/ops.h
+        csrc/compat/registration.h
+        csrc/cpu/utils/boundaries.h
+        csrc/cpu/morphology/enums.h
+        csrc/cpu/morphology/ops_policy.h
+        csrc/cpu/morphology/separable.h
+)
+if(SERRON_CUDA)
+    list(APPEND _serron_headers
+            csrc/cuda/utils/boundaries.cuh
+            csrc/cuda/utils/declarations.cuh
+            csrc/cuda/utils/smem.cuh
+            csrc/cuda/morphology/enums.cuh
+            csrc/cuda/morphology/ops_policy.cuh
+            csrc/cuda/morphology/scan.cuh
+            csrc/cuda/morphology/separable.cuh
+    )
+endif()
+set_source_files_properties(${_serron_headers} PROPERTIES HEADER_FILE_ONLY TRUE)
+
+Python_add_library(_C MODULE WITH_SOABI ${_serron_sources} ${_serron_headers})
 
 if(SERRON_CUDA)
     target_compile_definitions(_C PRIVATE SERRON_WITH_CUDA)
