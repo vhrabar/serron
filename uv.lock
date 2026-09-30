@@ -1147,9 +1147,9 @@ build = [
 
 [package.metadata]
 requires-dist = [
-    { name = "torch", specifier = ">=2.14.0" },
-    { name = "torch", marker = "extra == 'cpu'", specifier = ">=2.14.0", index = "https://download.pytorch.org/whl/cpu", conflict = { package = "serron", extra = "cpu" } },
-    { name = "torch", marker = "extra == 'cu132'", specifier = ">=2.14.0", index = "https://download.pytorch.org/whl/cu132", conflict = { package = "serron", extra = "cu132" } },
+    { name = "torch", specifier = ">=2.14,<2.15" },
+    { name = "torch", marker = "extra == 'cpu'", specifier = ">=2.14,<2.15", index = "https://download.pytorch.org/whl/cpu", conflict = { package = "serron", extra = "cpu" } },
+    { name = "torch", marker = "extra == 'cu132'", specifier = ">=2.14,<2.15", index = "https://download.pytorch.org/whl/cu132", conflict = { package = "serron", extra = "cu132" } },
 ]
 provides-extras = ["cpu", "cu132"]
 
