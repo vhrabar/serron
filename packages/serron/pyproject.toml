@@ -55,12 +55,12 @@ classifiers = [
 ]
 
 dependencies = [
-    "torch>=2.14.0",
+    "torch>=2.14,<2.15",
 ]
 
 [project.optional-dependencies]
-cpu = ["torch>=2.14.0"]
-cu132 = ["torch>=2.14.0"]
+cpu = ["torch>=2.14,<2.15"]
+cu132 = ["torch>=2.14,<2.15"]
 
 [project.urls]
 Homepage = "https://github.com/vhrabar/serron"
