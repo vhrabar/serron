@@ -3,7 +3,7 @@ name = "serron-workspace"
 version = "0"
 dependencies = [
     "kornia>=0.8.3",
-    "scikit-build-core>=1.0.3",
+    "scikit-build-core>=1.1.0",
     "scipy-stubs~=1.18.1",
     "serron",
 ]
@@ -25,7 +25,7 @@ dev = [
     "pytest-benchmark",
     "ruff",
     "mypy",
-    "scikit-build-core==1.0.3",
+    "scikit-build-core==1.1.0",
     "cmake",
     "ninja"
 ]
