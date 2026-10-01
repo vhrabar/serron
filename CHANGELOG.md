@@ -15,7 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
     `check_every` steps instead of every step: the iteration is monotone and bounded by the mask, so a block that
     leaves the image unchanged has reached the fixed point, and the device-to-host reads stay rare. The marker is
     clipped into the mask rather than checked against it, which costs no sync and lands on the same fixed point.
-    There is no backward pass yet, so an input that wants a gradient is rejected instead of silently detached.
+    There is no backward pass yet, so an input that wants a gradient is rejected instead of silently detached (#35).
 - Separable van Herk–Gil–Werman path for `erode`/`dilate` on CUDA and CPU, forward and backward, so a flat,
     axis-separable structuring element costs O(1) per output in the window length instead of O(kH × kW). A flat SE
     splits into a `1 × kW` row pass and a `kH × 1` column pass; each line is then scanned forward and backward in
@@ -38,13 +38,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - `import serron` no longer fails on a CPU-only torch with `libc10_cuda.so: cannot open shared object file`. The
     extension is now split in two: `_C` holds the op schemas and the CPU kernels and links only `torch_cpu`/`c10`,
-    while the CUDA kernels live in `_C_cuda`, which is loaded only when the installed torch was built with CUDA.
+    while the CUDA kernels live in `_C_cuda`, which is loaded only when the installed torch was built with CUDA (#41).
 - The torch requirement is pinned to the minor release the wheels are built against (`torch>=2.14,<2.15`), since the
     torch C++ ABI is not stable across minor releases; a newer torch is now a resolver error instead of an
     `undefined symbol` at import. The release workflow reads this pin from `pyproject.toml` when installing the torch
-    it compiles against.
+    it compiles against (#41).
 - A torch/extension mismatch at import now raises an `ImportError` naming the torch version the extension was built
-    against and the installed one, instead of the raw loader error.
+    against and the installed one, instead of the raw loader error (#41).
 
 ## [0.3.1] - 2026-08-31
 
