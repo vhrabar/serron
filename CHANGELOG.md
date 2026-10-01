@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-01
+
 ### Added
 
 - Geodesic reconstruction: `reconstruction_by_dilation` and `reconstruction_by_erosion` iterate
@@ -120,7 +122,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - Initial scaffolding: build system, operator registration and stubs for the planned alpha feature set (#1, #2).
 
-[Unreleased]: https://github.com/vhrabar/serron/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/vhrabar/serron/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/vhrabar/serron/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/vhrabar/serron/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/vhrabar/serron/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/vhrabar/serron/compare/v0.1.1...v0.2.0
