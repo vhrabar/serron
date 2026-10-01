@@ -148,6 +148,34 @@ def reference(op: str, x: torch.Tensor, kernel: torch.Tensor, border: BorderMode
     return builders[op]()
 
 
+def reference_reconstruction(
+    marker: torch.Tensor,
+    mask: torch.Tensor,
+    kernel: torch.Tensor,
+    border: BorderMode = BorderMode.CONSTANT,
+    *,
+    dilate: bool = True,
+) -> torch.Tensor:
+    """Iterate a geodesic step to its fixed point with the pure-PyTorch sweep.
+
+    :param marker: propagation seed of shape ``(N, C, H, W)``.
+    :param mask: bound on the propagation, same shape as ``marker``.
+    :param kernel: structuring element handed to the sweep.
+    :param border: padding mode used for the sweep.
+    :param dilate: ``True`` to reconstruct by dilation, ``False`` by erosion.
+    :returns: the reconstruction, same shape as ``marker``.
+    """
+    step = reference_dilation if dilate else reference_erosion
+    clip = torch.minimum if dilate else torch.maximum
+
+    current = clip(marker, mask)
+    while True:
+        nxt = clip(step(current, kernel, border), mask)
+        if torch.equal(nxt, current):
+            return nxt
+        current = nxt
+
+
 # --------------------------------------------------------------------------- #
 # Data factories
 # --------------------------------------------------------------------------- #

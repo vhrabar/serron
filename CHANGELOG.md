@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- Geodesic reconstruction: `reconstruction_by_dilation` and `reconstruction_by_erosion` iterate
+    `min(dilation(y), mask)` (resp. `max(erosion(y), mask)`) from a marker to its fixed point. The iteration is a
+    Python loop over the compiled `erode`/`dilate` ops, so it runs on both backends, and it defaults to
+    `BorderMode.CONSTANT`, which reads out-of-image taps as the neutral element. Convergence is tested once every
+    `check_every` steps instead of every step: the iteration is monotone and bounded by the mask, so a block that
+    leaves the image unchanged has reached the fixed point, and the device-to-host reads stay rare. The marker is
+    clipped into the mask rather than checked against it, which costs no sync and lands on the same fixed point.
+    There is no backward pass yet, so an input that wants a gradient is rejected instead of silently detached.
 - Separable van Herk–Gil–Werman path for `erode`/`dilate` on CUDA and CPU, forward and backward, so a flat,
     axis-separable structuring element costs O(1) per output in the window length instead of O(kH × kW). A flat SE
     splits into a `1 × kW` row pass and a `kH × 1` column pass; each line is then scanned forward and backward in

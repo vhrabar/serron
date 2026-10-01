@@ -104,6 +104,32 @@ if(SERRON_CUDA)
     list(APPEND _serron_targets _C_cuda)
 endif()
 
+# Headers are listed only so IDEs index them; they are not compiled on their own.
+set(_serron_headers
+        csrc/ops.h
+        csrc/compat/registration.h
+        csrc/cpu/utils/boundaries.h
+        csrc/cpu/morphology/enums.h
+        csrc/cpu/morphology/ops_policy.h
+        csrc/cpu/morphology/separable.h
+)
+set_source_files_properties(${_serron_headers} PROPERTIES HEADER_FILE_ONLY TRUE)
+target_sources(_C PRIVATE ${_serron_headers})
+
+if(SERRON_CUDA)
+    set(_serron_cuda_headers
+            csrc/cuda/utils/boundaries.cuh
+            csrc/cuda/utils/declarations.cuh
+            csrc/cuda/utils/smem.cuh
+            csrc/cuda/morphology/enums.cuh
+            csrc/cuda/morphology/ops_policy.cuh
+            csrc/cuda/morphology/scan.cuh
+            csrc/cuda/morphology/separable.cuh
+    )
+    set_source_files_properties(${_serron_cuda_headers} PROPERTIES HEADER_FILE_ONLY TRUE)
+    target_sources(_C_cuda PRIVATE ${_serron_cuda_headers})
+endif()
+
 set(SERRON_CUDA_NVCC_THREADS 1 CACHE STRING "nvcc --threads (per-.cu arch parallelism)")
 
 # -lineinfo on Debug; full device debug (-G) only when explicitly sanitizing.
