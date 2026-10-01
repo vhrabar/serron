@@ -16,6 +16,8 @@ from .functional import (
     erosion,
     gradient,
     opening,
+    reconstruction_by_dilation,
+    reconstruction_by_erosion,
     top_hat,
 )
 from .modules import Closing2d, Dilation2d, Erosion2d, Opening2d
@@ -40,6 +42,8 @@ __all__ = [
     "functional",
     "gradient",
     "opening",
+    "reconstruction_by_dilation",
+    "reconstruction_by_erosion",
     "structuring_element",
     "top_hat",
 ]

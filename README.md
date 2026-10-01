@@ -1,7 +1,7 @@
 # Serron
 
 ![Python](https://img.shields.io/badge/python-%E2%89%A53.12-blue?style=for-the-badge&logo=python)
-![PyTorch](https://img.shields.io/badge/pytorch-%E2%89%A52.12-ee4c2c?style=for-the-badge&logo=pytorch)
+![PyTorch](https://img.shields.io/badge/pytorch-2.14-ee4c2c?style=for-the-badge&logo=pytorch)
 ![CUDA](https://img.shields.io/badge/cuda-13.X-76b900?style=for-the-badge&logo=nvidia)
 ![PyPI Version](https://img.shields.io/pypi/v/serron?style=for-the-badge&logo=pypi&logoColor=orange)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge&logo=opensourceinitiative)
@@ -24,6 +24,10 @@ Windows (x86_64).
 ```bash
 pip install serron
 ```
+
+The wheels are built against torch 2.14 and require it (`torch>=2.14,<2.15`): the torch C++
+ABI changes between minor releases. They load on both CUDA and CPU-only torch builds; the
+CUDA kernels are only loaded when the installed torch has CUDA.
 
 ## Usage
 
@@ -59,7 +63,25 @@ eroded_reflect = serron.erosion(x, kernel, border=BorderMode.REFLECT)
 ```
 
 Available operators: `erosion`, `dilation`, `opening`, `closing`, `gradient`,
-`top_hat`, `black_hat`.
+`top_hat`, `black_hat`, `reconstruction_by_dilation`, `reconstruction_by_erosion`.
+
+### Geodesic reconstruction
+
+`reconstruction_by_dilation` floods a marker outwards until it settles, held down by a
+mask at every step; `reconstruction_by_erosion` is its dual. Both iterate the compiled
+`erode` / `dilate` ops to a fixed point and default to `BorderMode.CONSTANT`, which is the
+geodesic reading of the image boundary.
+
+```python
+marker = torch.zeros_like(x)
+marker[..., 128, 128] = x[..., 128, 128]
+
+with torch.no_grad():  # no backward pass yet
+    flooded = serron.reconstruction_by_dilation(marker, x, se.cross(3, device="cuda"))
+```
+
+The loop runs on the device, but its convergence test reads one flag back to the host every
+`check_every` steps (16 by default). Raise it to trade a few wasted steps for fewer syncs.
 
 ### Structuring elements
 

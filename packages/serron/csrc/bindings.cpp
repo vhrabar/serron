@@ -24,15 +24,8 @@ TORCH_LIBRARY_IMPL_EXPAND(TORCH_EXTENSION_NAME, CPU, ops) {
     ops.impl("dilate_backward", &serron::dilate_backward_cpu);
 }
 
-// CUDA implementations
-#ifdef SERRON_WITH_CUDA
-TORCH_LIBRARY_IMPL_EXPAND(TORCH_EXTENSION_NAME, CUDA, ops) {
-    ops.impl("erode", &serron::erode);
-    ops.impl("dilate", &serron::dilate);
-    ops.impl("erode_backward", &serron::erode_backward);
-    ops.impl("dilate_backward", &serron::dilate_backward);
-}
-#endif
+// CUDA implementations are registered by the separate _C_cuda library (cuda/bindings.cpp), so this
+// library links only torch_cpu/c10 and loads on CPU-only torch builds.
 
 namespace {
 

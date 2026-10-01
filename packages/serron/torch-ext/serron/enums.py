@@ -29,3 +29,11 @@ class BorderMode(Enum):
     REFLECT = "reflect"
     REPLICATE = "replicate"
     CONSTANT = "constant"
+
+
+BORDER_TO_INT: dict[BorderMode, int] = {
+    BorderMode.REFLECT: 0,
+    BorderMode.REPLICATE: 1,
+    BorderMode.CONSTANT: 2,
+}
+"""Encoding of :class:`BorderMode` the compiled ops take as their ``border`` argument."""
