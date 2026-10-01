@@ -34,6 +34,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - CUDA kernels now opt into the device's full dynamic shared-memory limit rather than using the default one,
     so the tiled and separable paths reach further before handing off. (#34).
 
+### Fixed
+
+- `import serron` no longer fails on a CPU-only torch with `libc10_cuda.so: cannot open shared object file`. The
+    extension is now split in two: `_C` holds the op schemas and the CPU kernels and links only `torch_cpu`/`c10`,
+    while the CUDA kernels live in `_C_cuda`, which is loaded only when the installed torch was built with CUDA.
+- The torch requirement is pinned to the minor release the wheels are built against (`torch>=2.14,<2.15`), since the
+    torch C++ ABI is not stable across minor releases; a newer torch is now a resolver error instead of an
+    `undefined symbol` at import. The release workflow reads this pin from `pyproject.toml` when installing the torch
+    it compiles against.
+- A torch/extension mismatch at import now raises an `ImportError` naming the torch version the extension was built
+    against and the installed one, instead of the raw loader error.
+
 ## [0.3.1] - 2026-08-31
 
 ### Fixed

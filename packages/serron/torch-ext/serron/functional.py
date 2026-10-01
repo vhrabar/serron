@@ -20,7 +20,7 @@ def erosion(input_: torch.Tensor, kernel: torch.Tensor, *, border: BorderMode = 
     :param border: border mode
     :return: eroded tensor
     """
-    result: torch.Tensor = _ErodeFunction.apply(input_, kernel, BORDER_TO_INT[border])  # type: ignore[no-untyped-call]
+    result: torch.Tensor = _ErodeFunction.apply(input_, kernel, BORDER_TO_INT[border])
     return result
 
 
@@ -32,7 +32,7 @@ def dilation(input_: torch.Tensor, kernel: torch.Tensor, *, border: BorderMode =
     :param border: border mode
     :return: dilated tensor
     """
-    result: torch.Tensor = _DilateFunction.apply(input_, kernel, BORDER_TO_INT[border])  # type: ignore[no-untyped-call]
+    result: torch.Tensor = _DilateFunction.apply(input_, kernel, BORDER_TO_INT[border])
     return result
 
 

@@ -69,22 +69,42 @@ if(NOT EXISTS "${TORCH_LIB_DIR}")
     message(FATAL_ERROR "Could not locate torch lib dir at: ${TORCH_LIB_DIR}")
 endif()
 
+# The torch C++ ABI is not stable across minor releases, so the loader compares this against the installed torch.
+execute_process(
+        COMMAND ${Python_EXECUTABLE} -c "import torch; print(torch.__version__.split('+')[0])"
+        OUTPUT_VARIABLE SERRON_TORCH_VERSION
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+if(SERRON_CUDA)
+    set(SERRON_WITH_CUDA_PY True)
+else()
+    set(SERRON_WITH_CUDA_PY False)
+endif()
+configure_file(cmake/_build_info.py.in "${CMAKE_CURRENT_BINARY_DIR}/_build_info.py" @ONLY)
+
 if(SERRON_CUDA)
     find_package(CUDAToolkit REQUIRED)
 endif()
 
-set(_serron_sources
+# _C holds the op schemas and the CPU kernels and links only torch_cpu/c10, so it loads on CPU-only torch.
+# _C_cuda holds the CUDA kernels and is loaded on top of it only when torch has CUDA.
+Python_add_library(_C MODULE WITH_SOABI
         csrc/bindings.cpp
         csrc/cpu/morphology/operators.cpp
         csrc/cpu/morphology/backward.cpp
 )
+set(_serron_targets _C)
+
 if(SERRON_CUDA)
-    list(APPEND _serron_sources
+    Python_add_library(_C_cuda MODULE WITH_SOABI
+            csrc/cuda/bindings.cpp
             csrc/cuda/morphology/operators.cu
             csrc/cuda/morphology/backward.cu
     )
+    list(APPEND _serron_targets _C_cuda)
 endif()
 
+# Headers are listed only so IDEs index them; they are not compiled on their own.
 set(_serron_headers
         csrc/ops.h
         csrc/compat/registration.h
@@ -93,8 +113,11 @@ set(_serron_headers
         csrc/cpu/morphology/ops_policy.h
         csrc/cpu/morphology/separable.h
 )
+set_source_files_properties(${_serron_headers} PROPERTIES HEADER_FILE_ONLY TRUE)
+target_sources(_C PRIVATE ${_serron_headers})
+
 if(SERRON_CUDA)
-    list(APPEND _serron_headers
+    set(_serron_cuda_headers
             csrc/cuda/utils/boundaries.cuh
             csrc/cuda/utils/declarations.cuh
             csrc/cuda/utils/smem.cuh
@@ -103,52 +126,52 @@ if(SERRON_CUDA)
             csrc/cuda/morphology/scan.cuh
             csrc/cuda/morphology/separable.cuh
     )
-endif()
-set_source_files_properties(${_serron_headers} PROPERTIES HEADER_FILE_ONLY TRUE)
-
-Python_add_library(_C MODULE WITH_SOABI ${_serron_sources} ${_serron_headers})
-
-if(SERRON_CUDA)
-    target_compile_definitions(_C PRIVATE SERRON_WITH_CUDA)
+    set_source_files_properties(${_serron_cuda_headers} PROPERTIES HEADER_FILE_ONLY TRUE)
+    target_sources(_C_cuda PRIVATE ${_serron_cuda_headers})
 endif()
 
 set(SERRON_CUDA_NVCC_THREADS 1 CACHE STRING "nvcc --threads (per-.cu arch parallelism)")
 
 # -lineinfo on Debug; full device debug (-G) only when explicitly sanitizing.
 option(CUDA_SANITIZE "Build device code with -G for compute-sanitizer" OFF)
-target_compile_options(_C PRIVATE
-        $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:--threads=${SERRON_CUDA_NVCC_THREADS}>
-        $<$<AND:$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>,$<CONFIG:Debug>>:-lineinfo>
-        $<$<AND:$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>,$<CONFIG:Debug>,$<BOOL:${CUDA_SANITIZE}>>:-G>
-)
+separate_arguments(_serron_torch_cxx_flags NATIVE_COMMAND "${TORCH_CXX_FLAGS}")
 
-
-if(MSVC)
-    target_compile_options(_C PRIVATE
-            $<$<COMPILE_LANGUAGE:CXX>:/Zc:preprocessor>
-            $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/Zc:preprocessor>
+foreach(_target IN LISTS _serron_targets)
+    target_compile_options(${_target} PRIVATE
+            $<$<COMPILE_LANGUAGE:CXX>:${_serron_torch_cxx_flags}>
+            $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:--threads=${SERRON_CUDA_NVCC_THREADS}>
+            $<$<AND:$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>,$<CONFIG:Debug>>:-lineinfo>
+            $<$<AND:$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>,$<CONFIG:Debug>,$<BOOL:${CUDA_SANITIZE}>>:-G>
     )
-endif()
 
-target_include_directories(_C PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/csrc
-        ${CMAKE_CURRENT_SOURCE_DIR}/csrc/compat
-        ${TORCH_INCLUDE_DIRS}
-        ${Python_INCLUDE_DIRS}
-)
+    if(MSVC)
+        target_compile_options(${_target} PRIVATE
+                $<$<COMPILE_LANGUAGE:CXX>:/Zc:preprocessor>
+                $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/Zc:preprocessor>
+        )
+    endif()
 
-target_link_libraries(_C PRIVATE ${TORCH_LIBRARIES})
+    target_include_directories(${_target} PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/csrc
+            ${CMAKE_CURRENT_SOURCE_DIR}/csrc/compat
+            ${TORCH_INCLUDE_DIRS}
+            ${Python_INCLUDE_DIRS}
+    )
+
+    if(NOT WIN32)
+        set_target_properties(${_target} PROPERTIES
+                BUILD_RPATH   "${TORCH_LIB_DIR}"
+                INSTALL_RPATH "$ORIGIN/../torch/lib"
+        )
+    endif()
+endforeach()
+
+target_link_libraries(_C PRIVATE torch_cpu_library)
 
 if(SERRON_CUDA)
-    target_include_directories(_C PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
-    target_link_libraries(_C PRIVATE CUDA::cudart CUDA::cublas)
+    target_include_directories(_C_cuda PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    target_link_libraries(_C_cuda PRIVATE ${TORCH_LIBRARIES} CUDA::cudart CUDA::cublas)
 endif()
 
-if(NOT WIN32)
-    set_target_properties(_C PROPERTIES
-            BUILD_RPATH   "${TORCH_LIB_DIR}"
-            INSTALL_RPATH "$ORIGIN/../torch/lib"
-    )
-endif()
-
-install(TARGETS _C LIBRARY DESTINATION serron)
+install(TARGETS ${_serron_targets} LIBRARY DESTINATION serron)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/_build_info.py" DESTINATION serron)
