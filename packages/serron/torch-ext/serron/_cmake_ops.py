@@ -48,7 +48,7 @@ def _build_torch_version() -> str | None:
 def _load(path: str) -> None:
     built_for = _build_torch_version()
     try:
-        torch.ops.load_library(path)  # type: ignore[no-untyped-call]
+        torch.ops.load_library(path)
     except OSError as exc:
         raise ImportError(
             f"Could not load the compiled Serron extension {os.path.basename(path)} "

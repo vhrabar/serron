@@ -23,9 +23,6 @@ pip-wheel-metadata/
 # pytest
 .pytest_cache/
 
-# mypy
-.mypy_cache/
-
 # Ruff / linters
 .ruff_cache/
 

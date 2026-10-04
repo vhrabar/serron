@@ -22,8 +22,8 @@ def _time_ms(fn: Callable[[], object], reps: int) -> float:
     fn()
     torch.cuda.synchronize()
 
-    start = torch.cuda.Event(enable_timing=True)  # type: ignore[no-untyped-call]
-    end = torch.cuda.Event(enable_timing=True)  # type: ignore[no-untyped-call]
+    start = torch.cuda.Event(enable_timing=True)
+    end = torch.cuda.Event(enable_timing=True)
     samples: list[float] = []
     for _ in range(reps):
         start.record()
