@@ -10,12 +10,13 @@
 
 #include <cuda_runtime.h>
 
-#include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
+#include <compat/acc_type.h>
+#include <compat/cuda_launch_check.cuh>
 
 #include <cstdint>
 #include <tuple>
@@ -28,7 +29,7 @@ namespace {
  * Grayscale morphology backward kernel, one thread per output element.
  *
  *
- * @tparam scalar_t              Element type of the tensors; the reduction accumulates in at::acc_type<scalar_t>.
+ * @tparam scalar_t              Element type of the tensors; the reduction accumulates in acc_type<scalar_t>.
  * @tparam Op                    Operation policy (@ref ErodeOp or @ref DilateOp).
  * @param grad_output            Upstream gradient, contiguous (N, C, H, W).
  * @param input                  Forward input, contiguous (N, C, H, W).
@@ -51,7 +52,7 @@ __global__ void morphology_backward_kernel(const scalar_t* __restrict__ grad_out
                                            const int64_t H, const int64_t W, const int64_t kH, const int64_t kW,
                                            const int64_t kernel_channel_stride, const BorderMode border,
                                            const bool need_kernel_grad) {
-    using acc_t = at::acc_type<scalar_t, true>;
+    using acc_t = acc_type<scalar_t, true>;
 
     const int64_t idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
     if (idx >= N * C * H * W)
@@ -116,7 +117,7 @@ __global__ void morphology_backward_kernel(const scalar_t* __restrict__ grad_out
  * block = (TILE_X, TILE_Y); grid = (ceil(W/TILE_X), ceil(H/TILE_Y), N*C);
  * smem = (tile_h*tile_w + kH*kW) * sizeof(scalar_t).
  *
- * @tparam scalar_t              Element type; the reduction accumulates in at::acc_type<scalar_t>.
+ * @tparam scalar_t              Element type; the reduction accumulates in acc_type<scalar_t>.
  * @tparam Op                    Operation policy (@ref ErodeOp or @ref DilateOp).
  * @param grad_output            Upstream gradient, contiguous (N, C, H, W).
  * @param input                  Forward input, contiguous (N, C, H, W).
@@ -139,7 +140,7 @@ morphology_backward_tiled_kernel(const scalar_t* __restrict__ grad_output, const
                                  scalar_t* __restrict__ grad_kernel, const int64_t C, const int64_t H, const int64_t W,
                                  const int64_t kH, const int64_t kW, const int64_t kernel_channel_stride,
                                  const BorderMode border, const bool need_kernel_grad) {
-    using acc_t = at::acc_type<scalar_t, true>;
+    using acc_t = acc_type<scalar_t, true>;
 
     const int64_t anchor_h = kH / 2;
     const int64_t anchor_w = kW / 2;
@@ -292,7 +293,7 @@ __device__ __forceinline__ void run_arg_scans(ArgTap<acc_t>* s_forward, ArgTap<a
  * block = (LINE_TILE); grid = (ceil(W/out_count), H, N*C);
  * smem = @ref line_smem_bytes over @c sizeof(ArgTap<acc_t>).
  *
- * @tparam scalar_t     Element type; the reduction accumulates in at::acc_type<scalar_t>.
+ * @tparam scalar_t     Element type; the reduction accumulates in acc_type<scalar_t>.
  * @tparam Op           Operation policy (@ref ErodeOp or @ref DilateOp).
  * @param input         Forward input, contiguous (N, C, H, W).
  * @param row_best_val  Row-champion value per (n, c, h, w), contiguous (N, C, H, W).
@@ -308,7 +309,7 @@ __global__ void morphology_row_argreduce_kernel(const scalar_t* __restrict__ inp
                                                 cuda::std::int32_t* __restrict__ row_best_dj, const int64_t H,
                                                 const int64_t W, const int64_t kW, const int64_t chunks,
                                                 const BorderMode border) {
-    using acc_t = at::acc_type<scalar_t, true>;
+    using acc_t = acc_type<scalar_t, true>;
 
     const int64_t tile_len = chunks * kW;
     const int64_t out_count = tile_len - kW + 1;
@@ -347,7 +348,7 @@ __global__ void morphology_row_argreduce_kernel(const scalar_t* __restrict__ inp
  * block = (LINE_TILE); grid = (ceil(H/out_count), W, N*C);
  * smem = @ref line_smem_bytes over @c sizeof(ArgTap<acc_t>).
  *
- * @tparam scalar_t              Element type; the reduction accumulates in at::acc_type<scalar_t>.
+ * @tparam scalar_t              Element type; the reduction accumulates in acc_type<scalar_t>.
  * @tparam Op                    Operation policy (@ref ErodeOp or @ref DilateOp).
  * @param row_best_val           Row-pass output, contiguous (N, C, H, W).
  * @param row_best_dj            Row-pass output, contiguous (N, C, H, W).
@@ -370,7 +371,7 @@ __global__ void morphology_col_argreduce_kernel(
     const scalar_t* __restrict__ grad_output, scalar_t* __restrict__ grad_input, scalar_t* __restrict__ grad_kernel,
     const int64_t C, const int64_t H, const int64_t W, const int64_t kH, const int64_t kW, const int64_t chunks,
     const int64_t kernel_channel_stride, const BorderMode border, const bool need_kernel_grad) {
-    using acc_t = at::acc_type<scalar_t, true>;
+    using acc_t = acc_type<scalar_t, true>;
 
     const int64_t tile_len = chunks * kH;
     const int64_t out_count = tile_len - kH + 1;
@@ -434,7 +435,7 @@ bool launch_morphology_backward_separable(const scalar_t* input, const scalar_t*
                                           int64_t N, int64_t C, int64_t H, int64_t W, int64_t kH, int64_t kW,
                                           int64_t kernel_channel_stride, BorderMode border, bool need_kernel_grad,
                                           cudaStream_t stream) {
-    using acc_t = at::acc_type<scalar_t, true>;
+    using acc_t = acc_type<scalar_t, true>;
     constexpr size_t kTap = sizeof(ArgTap<acc_t>);
 
     const dim3 block(LINE_TILE);
@@ -477,7 +478,7 @@ void launch_morphology_backward(const scalar_t* grad_output, const scalar_t* inp
                                 int32_t* row_best_dj, bool use_separable, int64_t N, int64_t C, int64_t H, int64_t W,
                                 int64_t kH, int64_t kW, int64_t kernel_channel_stride, BorderMode border,
                                 bool need_kernel_grad, cudaStream_t stream) {
-    using acc_t = at::acc_type<scalar_t, true>;
+    using acc_t = acc_type<scalar_t, true>;
 
     // One scan chunk is the smallest tile a line pass can stage. If even that overflows the
     // budget, the kernels below take over no matter how separable the SE is.
@@ -604,7 +605,7 @@ std::tuple<at::Tensor, at::Tensor> morphology_backward_impl(const at::Tensor& gr
                 break;
             }
         });
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    SERRON_CUDA_KERNEL_LAUNCH_CHECK();
 
     return {grad_input, grad_kernel};
 }

@@ -10,11 +10,12 @@
 
 #include <cuda_runtime.h>
 
-#include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
+#include <compat/acc_type.h>
+#include <compat/cuda_launch_check.cuh>
 
 #include <cmath>
 #include <cstdlib>
@@ -31,7 +32,7 @@ namespace {
  *
  *
  * @tparam scalar_t              Element type of @p input / @p kernel / @p output; the reduction accumulates in
- * at::acc_type<scalar_t>.
+ * acc_type<scalar_t>.
  * @tparam Op                    Operation policy (@ref ErodeOp or @ref DilateOp).
  * @param input                  Input image, contiguous (N, C, H, W).
  * @param kernel                 Structuring element, contiguous (kH, kW) or (C, kH, kW).
@@ -51,7 +52,7 @@ __global__ void morphology_kernel(const scalar_t* __restrict__ input, const scal
                                   scalar_t* __restrict__ output, const int64_t N, const int64_t C, const int64_t H,
                                   const int64_t W, const int64_t kH, const int64_t kW,
                                   const int64_t kernel_channel_stride, const BorderMode border) {
-    using acc_t = at::acc_type<scalar_t, true>;
+    using acc_t = acc_type<scalar_t, true>;
 
     const int64_t idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
     if (idx >= N * C * H * W)
@@ -103,7 +104,7 @@ __global__ void morphology_kernel(const scalar_t* __restrict__ input, const scal
  * Launch config: block = (TILE_X, TILE_Y); grid = (ceil(W/TILE_X), ceil(H/TILE_Y), N*C);
  * dynamic shared memory = (tile_h*tile_w + kH*kW) * sizeof(scalar_t) bytes.
  *
- * @tparam scalar_t              Element type; the reduction accumulates in at::acc_type<scalar_t>.
+ * @tparam scalar_t              Element type; the reduction accumulates in acc_type<scalar_t>.
  * @tparam Op                    Operation policy (@ref ErodeOp or @ref DilateOp).
  * @param input                  Input image, contiguous (N, C, H, W).
  * @param kernel                 Structuring element, contiguous (kH, kW) or (C, kH, kW).
@@ -121,7 +122,7 @@ __global__ void morphology_tiled_kernel(const scalar_t* __restrict__ input, cons
                                         scalar_t* __restrict__ output, const int64_t C, const int64_t H,
                                         const int64_t W, const int64_t kH, const int64_t kW,
                                         const int64_t kernel_channel_stride, const BorderMode border) {
-    using acc_t = at::acc_type<scalar_t, true>;
+    using acc_t = acc_type<scalar_t, true>;
 
     const int64_t anchor_h = kH / 2;
     const int64_t anchor_w = kW / 2;
@@ -188,7 +189,7 @@ enum class LineAxis : int { kRow = 0, kCol = 1 };
 /**
  * Separable line-reduction kernel (van Herk / Gil-Werman)
  *
- * @tparam scalar_t  Element type; the reduction accumulates in at::acc_type<scalar_t>.
+ * @tparam scalar_t  Element type; the reduction accumulates in acc_type<scalar_t>.
  * @tparam Op        Operation policy (@ref ErodeOp or @ref DilateOp); only @c neutral and
  * @c reduce are used.
  * @tparam Axis      @ref LineAxis::kRow reduces along W (contiguous); @ref LineAxis::kCol
@@ -207,7 +208,7 @@ template <typename scalar_t, typename Op, LineAxis Axis>
 __global__ void morphology_line_kernel(const scalar_t* __restrict__ input, scalar_t* __restrict__ output,
                                        const int64_t N, const int64_t C, const int64_t H, const int64_t W,
                                        const int64_t k, const int64_t chunks, const BorderMode border) {
-    using acc_t = at::acc_type<scalar_t, true>;
+    using acc_t = acc_type<scalar_t, true>;
 
     const int64_t line_len = (Axis == LineAxis::kRow) ? W : H;
     const int64_t anchor = k / 2;
@@ -430,7 +431,7 @@ at::Tensor morphology_impl(const at::Tensor& input, const at::Tensor& kernel, in
                 break;
             }
         });
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    SERRON_CUDA_KERNEL_LAUNCH_CHECK();
 
     return output;
 }

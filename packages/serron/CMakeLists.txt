@@ -119,6 +119,8 @@ endif()
 # Headers are listed only so IDEs index them; they are not compiled on their own.
 set(_serron_headers
         csrc/ops.h
+        csrc/compat/acc_type.h
+        csrc/compat/grain_size.h
         csrc/compat/registration.h
         csrc/cpu/utils/boundaries.h
         csrc/cpu/morphology/enums.h
@@ -132,6 +134,7 @@ if(SERRON_CUDA)
     set(_serron_cuda_headers
             csrc/cuda/utils/boundaries.cuh
             csrc/cuda/utils/declarations.cuh
+            csrc/compat/cuda_launch_check.cuh
             csrc/cuda/utils/smem.cuh
             csrc/cuda/morphology/enums.cuh
             csrc/cuda/morphology/ops_policy.cuh

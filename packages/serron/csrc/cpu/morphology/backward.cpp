@@ -5,10 +5,11 @@
 #include <cpu/morphology/separable.h>
 #include <cpu/utils/boundaries.h>
 
-#include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <c10/util/Exception.h>
+#include <compat/acc_type.h>
+#include <compat/grain_size.h>
 
 #include <cmath>
 #include <cstdint>
@@ -30,7 +31,7 @@ namespace {
  * and SE-grad target the same tap. Each output element is independent, so the
  * search runs under @c at::parallel_for.
  *
- * @tparam scalar_t              Element type of the tensors; the reduction accumulates in at::acc_type<scalar_t>.
+ * @tparam scalar_t              Element type of the tensors; the reduction accumulates in acc_type<scalar_t>.
  * @tparam Op                    Operation policy (@ref ErodeOp or @ref DilateOp).
  * @param input                  Forward input, contiguous (N, C, H, W).
  * @param kernel                 Forward structuring element, contiguous (kH, kW) or (C, kH, kW).
@@ -45,14 +46,14 @@ template <typename scalar_t, typename Op>
 void morphology_backward_winners(const scalar_t* input, const scalar_t* kernel, int64_t* best_in, int64_t* best_k,
                                  const int64_t N, const int64_t C, const int64_t H, const int64_t W, const int64_t kH,
                                  const int64_t kW, const int64_t kernel_channel_stride, const BorderMode border) {
-    using acc_t = at::acc_type<scalar_t, false>;
+    using acc_t = acc_type<scalar_t, false>;
 
     const int64_t anchor_h = kH / 2;
     const int64_t anchor_w = kW / 2;
     const int64_t total = N * C * H * W;
     const auto neutral = Op::template neutral<acc_t>();
 
-    at::parallel_for(0, total, at::internal::GRAIN_SIZE, [&](const int64_t begin, const int64_t end) {
+    at::parallel_for(0, total, kGrainSize, [&](const int64_t begin, const int64_t end) {
         for (int64_t idx = begin; idx < end; ++idx) {
             const int64_t w = idx % W;
             const int64_t h = (idx / W) % H;
@@ -124,7 +125,7 @@ inline ArgTap<acc_t> arg_combine(const ArgTap<acc_t>& lo, const ArgTap<acc_t>& h
  * the backward scan at its first sample and the forward scan at its last settles it, whatever
  * @p k is.
  *
- * @tparam scalar_t  Element type; the reduction accumulates in at::acc_type<scalar_t, false>.
+ * @tparam scalar_t  Element type; the reduction accumulates in acc_type<scalar_t, false>.
  * @tparam Op        Operation policy (@ref ErodeOp or @ref DilateOp).
  * @param read       Returns the sample at (line, position) for an in-image position.
  * @param write      Receives (line, position, winning value, winning offset).
@@ -136,13 +137,13 @@ inline ArgTap<acc_t> arg_combine(const ArgTap<acc_t>& lo, const ArgTap<acc_t>& h
 template <typename scalar_t, typename Op, typename Read, typename Write>
 void argreduce_lines(Read read, Write write, const int64_t lines, const int64_t line_len, const int64_t k,
                      const BorderMode border) {
-    using acc_t = at::acc_type<scalar_t, false>;
+    using acc_t = acc_type<scalar_t, false>;
 
     const int64_t anchor = k / 2;
     const int64_t span = line_len + k - 1;         // positions [-anchor, line_len + k - 1 - anchor)
     const int64_t padded = (span + k - 1) / k * k; // whole chunks of k -> both scans reset in step
     const auto neutral = Op::template neutral<acc_t>();
-    const int64_t grain = std::max<int64_t>(1, at::internal::GRAIN_SIZE / std::max<int64_t>(line_len, 1));
+    const int64_t grain = std::max<int64_t>(1, kGrainSize / std::max<int64_t>(line_len, 1));
 
     at::parallel_for(0, lines, grain, [&](const int64_t begin, const int64_t end) {
         std::vector<ArgTap<acc_t>> samples(static_cast<size_t>(padded));
@@ -191,7 +192,7 @@ void morphology_backward_winners_separable(const scalar_t* input, int64_t* best_
                                            const int64_t C, const int64_t H, const int64_t W, const int64_t kH,
                                            const int64_t kW, const int64_t kernel_channel_stride,
                                            const BorderMode border) {
-    using acc_t = at::acc_type<scalar_t, false>;
+    using acc_t = acc_type<scalar_t, false>;
 
     const int64_t anchor_h = kH / 2;
     const int64_t anchor_w = kW / 2;
@@ -236,7 +237,7 @@ void morphology_backward_winners_separable(const scalar_t* input, int64_t* best_
 /**
  * Replays the upstream gradient onto the winning taps.
  *
- * @tparam scalar_t     Element type of the tensors; the scatter accumulates in at::acc_type<scalar_t>.
+ * @tparam scalar_t     Element type of the tensors; the scatter accumulates in acc_type<scalar_t>.
  * @tparam Op           Operation policy (@ref ErodeOp or @ref DilateOp).
  * @param grad_output   Upstream gradient, contiguous (N, C, H, W).
  * @param grad_input    Gradient w.r.t. the forward input, pre-zeroed (N, C, H, W); scattered into.
@@ -248,7 +249,7 @@ void morphology_backward_winners_separable(const scalar_t* input, int64_t* best_
 template <typename scalar_t, typename Op>
 void scatter_backward(const scalar_t* grad_output, scalar_t* grad_input, scalar_t* grad_kernel, const int64_t* best_in,
                       const int64_t* best_k, const int64_t total, const bool need_kernel_grad) {
-    using acc_t = at::acc_type<scalar_t, false>;
+    using acc_t = acc_type<scalar_t, false>;
 
     const auto se_grad_sign = Op::template se_grad_sign<acc_t>();
     for (int64_t idx = 0; idx < total; ++idx) {

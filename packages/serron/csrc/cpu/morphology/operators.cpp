@@ -5,10 +5,11 @@
 #include <cpu/morphology/separable.h>
 #include <cpu/utils/boundaries.h>
 
-#include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <c10/util/Exception.h>
+#include <compat/acc_type.h>
+#include <compat/grain_size.h>
 
 #include <algorithm>
 #include <cmath>
@@ -23,7 +24,7 @@ namespace {
  * @c at::parallel_for. Each output is independent, so no synchronisation is needed.
  *
  * @tparam scalar_t              Element type of @p input / @p kernel / @p output; the reduction accumulates in
- * at::acc_type<scalar_t, false>.
+ * acc_type<scalar_t, false>.
  * @tparam Op                    Operation policy (@ref ErodeOp or @ref DilateOp).
  * @param input                  Input image, contiguous (N, C, H, W).
  * @param kernel                 Structuring element, contiguous (kH, kW) or (C, kH, kW).
@@ -37,14 +38,14 @@ template <typename scalar_t, typename Op>
 void morphology_cpu_kernel(const scalar_t* input, const scalar_t* kernel, scalar_t* output, const int64_t N,
                            const int64_t C, const int64_t H, const int64_t W, const int64_t kH, const int64_t kW,
                            const int64_t kernel_channel_stride, const BorderMode border) {
-    using acc_t = at::acc_type<scalar_t, false>;
+    using acc_t = acc_type<scalar_t, false>;
 
     const int64_t anchor_h = kH / 2;
     const int64_t anchor_w = kW / 2;
     const int64_t total = N * C * H * W;
     const auto neutral = Op::template neutral<acc_t>();
 
-    at::parallel_for(0, total, at::internal::GRAIN_SIZE, [&](const int64_t begin, const int64_t end) {
+    at::parallel_for(0, total, kGrainSize, [&](const int64_t begin, const int64_t end) {
         for (int64_t idx = begin; idx < end; ++idx) {
             const int64_t w = idx % W;
             const int64_t h = (idx / W) % H;
@@ -87,7 +88,7 @@ enum class LineAxis : int { kRow = 0, kCol = 1 };
  * of a single pairwise reduce of the two scans, so the cost per output is independent of the
  * window length. Requires a flat structuring element, whose taps leave the samples unchanged.
  *
- * @tparam scalar_t  Element type; the reduction accumulates in at::acc_type<scalar_t, false>.
+ * @tparam scalar_t  Element type; the reduction accumulates in acc_type<scalar_t, false>.
  * @tparam Op        Operation policy (@ref ErodeOp or @ref DilateOp); only @c neutral and @c reduce are used.
  * @tparam Axis      @ref LineAxis::kRow reduces along W (contiguous); @ref LineAxis::kCol along H (stride W).
  * @param input      Input image, contiguous (N, C, H, W).
@@ -99,7 +100,7 @@ enum class LineAxis : int { kRow = 0, kCol = 1 };
 template <typename scalar_t, typename Op, LineAxis Axis>
 void morphology_line_cpu_kernel(const scalar_t* input, scalar_t* output, const int64_t N, const int64_t C,
                                 const int64_t H, const int64_t W, const int64_t k, const BorderMode border) {
-    using acc_t = at::acc_type<scalar_t, false>;
+    using acc_t = acc_type<scalar_t, false>;
 
     const int64_t line_len = (Axis == LineAxis::kRow) ? W : H;
     const int64_t lines = (Axis == LineAxis::kRow) ? H : W;
@@ -108,7 +109,7 @@ void morphology_line_cpu_kernel(const scalar_t* input, scalar_t* output, const i
     const int64_t span = line_len + k - 1;
     const int64_t padded = (span + k - 1) / k * k;
     const auto neutral = Op::template neutral<acc_t>();
-    const int64_t grain = std::max<int64_t>(1, at::internal::GRAIN_SIZE / std::max<int64_t>(line_len, 1));
+    const int64_t grain = std::max<int64_t>(1, kGrainSize / std::max<int64_t>(line_len, 1));
 
     at::parallel_for(0, N * C * lines, grain, [&](const int64_t begin, const int64_t end) {
         // [span, padded) is never written, so it keeps the neutral element these start out with.

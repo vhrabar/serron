@@ -6,7 +6,7 @@
 
 #include <cuda_runtime.h>
 
-#include <ATen/AccumulateType.h>
+#include <compat/acc_type.h>
 
 namespace serron {
 
@@ -14,7 +14,7 @@ namespace serron {
  * In-place scan of one @p k-sample chunk in shared memory -> single warp
  *
  * @tparam Op        Operation policy (@ref ErodeOp or @ref DilateOp).
- * @tparam scalar_t  Stored element type; lanes exchange @c at::acc_type<scalar_t>.
+ * @tparam scalar_t  Stored element type; lanes exchange @c acc_type<scalar_t>.
  * @tparam Forward   true scans from the chunk's first sample, false from its last.
  * @param chunk      Shared-memory base of the chunk; overwritten with the scan.
  * @param k          Samples in the chunk.
@@ -22,7 +22,7 @@ namespace serron {
  */
 template <typename Op, typename scalar_t, bool Forward>
 __device__ __forceinline__ void scan_chunk_warp(scalar_t* chunk, const int64_t k, const unsigned lane) {
-    using acc_t = at::acc_type<scalar_t, true>;
+    using acc_t = acc_type<scalar_t, true>;
     constexpr unsigned kAll = 0xffffffffu;
 
     const auto neutral = Op::template neutral<acc_t>();
@@ -54,14 +54,14 @@ __device__ __forceinline__ void scan_chunk_warp(scalar_t* chunk, const int64_t k
  * In-place scan of one @p k-sample chunk in shared memory -> single threaded
  *
  * @tparam Op        Operation policy (@ref ErodeOp or @ref DilateOp).
- * @tparam scalar_t  Stored element type; the scan accumulates in @c at::acc_type<scalar_t>.
+ * @tparam scalar_t  Stored element type; the scan accumulates in @c acc_type<scalar_t>.
  * @tparam Forward   true scans from the chunk's first sample, false from its last.
  * @param chunk      Shared-memory base of the chunk; overwritten with the scan.
  * @param k          Samples in the chunk.
  */
 template <typename Op, typename scalar_t, bool Forward>
 __device__ __forceinline__ void scan_chunk_serial(scalar_t* chunk, const int64_t k) {
-    using acc_t = at::acc_type<scalar_t, true>;
+    using acc_t = acc_type<scalar_t, true>;
 
     acc_t acc = static_cast<acc_t>(chunk[Forward ? 0 : k - 1]);
     for (int64_t i = 1; i < k; ++i) {
