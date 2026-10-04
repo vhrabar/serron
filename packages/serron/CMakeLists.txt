@@ -148,6 +148,27 @@ set(SERRON_CUDA_NVCC_THREADS 1 CACHE STRING "nvcc --threads (per-.cu arch parall
 option(CUDA_SANITIZE "Build device code with -G for compute-sanitizer" OFF)
 separate_arguments(_serron_torch_cxx_flags NATIVE_COMMAND "${TORCH_CXX_FLAGS}")
 
+# Restrict the extension to the torch stable ABI
+option(SERRON_STABLE_ABI "Build against the torch stable ABI only" OFF)
+
+# Lowest torch release the stable ABI is targeted at
+set(SERRON_TORCH_TARGET "2.13" CACHE STRING "Minimum torch version to target, major.minor")
+
+if(SERRON_STABLE_ABI)
+    # TORCH_TARGET_VERSION is (major << 56) | (minor << 48);
+    string(REPLACE "." ";" _serron_target_parts "${SERRON_TORCH_TARGET}")
+    list(LENGTH _serron_target_parts _serron_target_len)
+    if(_serron_target_len LESS 2)
+        message(FATAL_ERROR "SERRON_TORCH_TARGET must be major.minor, got '${SERRON_TORCH_TARGET}'")
+    endif()
+    list(GET _serron_target_parts 0 _serron_target_major)
+    list(GET _serron_target_parts 1 _serron_target_minor)
+    math(EXPR SERRON_TORCH_TARGET_HEX
+            "(${_serron_target_major} << 56) | (${_serron_target_minor} << 48)" OUTPUT_FORMAT HEXADECIMAL)
+    message(STATUS "serron: stable ABI only, targeting torch ${SERRON_TORCH_TARGET} "
+            "(TORCH_TARGET_VERSION=${SERRON_TORCH_TARGET_HEX}ULL)")
+endif()
+
 foreach(_target IN LISTS _serron_targets)
     target_compile_options(${_target} PRIVATE
             $<$<COMPILE_LANGUAGE:CXX>:${_serron_torch_cxx_flags}>
@@ -155,6 +176,13 @@ foreach(_target IN LISTS _serron_targets)
             $<$<AND:$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>,$<CONFIG:Debug>>:-lineinfo>
             $<$<AND:$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>,$<CONFIG:Debug>,$<BOOL:${CUDA_SANITIZE}>>:-G>
     )
+
+    if(SERRON_STABLE_ABI)
+        target_compile_definitions(${_target} PRIVATE
+                TORCH_STABLE_ONLY
+                TORCH_TARGET_VERSION=${SERRON_TORCH_TARGET_HEX}ULL
+        )
+    endif()
 
     if(MSVC)
         target_compile_options(${_target} PRIVATE

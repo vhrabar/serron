@@ -5,8 +5,6 @@
 
 #include <cuda_runtime.h>
 
-#include <torch/enum.h>
-
 /**
  * Boundary handling for out-of-image neighbourhood samples.
  */
