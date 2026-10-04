@@ -3,11 +3,18 @@
 
 #include <cuda/utils/declarations.cuh>
 
+#include <cuda_runtime.h>
+
+#include <ATen/Dispatch.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <c10/util/Exception.h>
+#include <compat/flatness.h>
 
 #include <algorithm>
 #include <cstdlib>
 #include <optional>
+#include <vector>
 
 namespace serron {
 
@@ -52,11 +59,37 @@ inline int64_t line_chunks_per_block(const int64_t k, const int64_t line_len, co
     return std::min({by_smem, by_line, std::max(by_scan, by_outputs)});
 }
 
+/// Throws when @p status reports a failure, naming @p what.
+inline void check_cuda(const cudaError_t status, const char* what) {
+    TORCH_CHECK(status == cudaSuccess, "serron: ", what, " failed: ", cudaGetErrorString(status));
+}
+
 /**
- * True when @p kernel_c is a flat SE
+ * True when @p kernel_c is a flat SE.
+ *
+ * Copies the structuring element to the host and scans it there. The copy is issued on the current stream and
+ * waited on: torch's non-default streams are created non-blocking, so a null-stream copy would not be ordered
+ * after whatever produced @p kernel_c.
+ *
+ * @param kernel_c  Contiguous structuring element on a CUDA device.
  */
 inline bool se_is_flat(const at::Tensor& kernel_c) {
-    return kernel_c.eq(0).all().item<bool>();
+    const int64_t n = kernel_c.numel();
+    if (n == 0) {
+        return true;
+    }
+
+    std::vector<char> host(static_cast<size_t>(n) * static_cast<size_t>(kernel_c.element_size()));
+    const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+    check_cuda(cudaMemcpyAsync(host.data(), kernel_c.const_data_ptr(), host.size(), cudaMemcpyDeviceToHost, stream),
+               "structuring-element copy");
+    check_cuda(cudaStreamSynchronize(stream), "structuring-element copy sync");
+
+    bool flat = false;
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, kernel_c.scalar_type(),
+                                    "serron_se_is_flat_cuda",
+                                    [&] { flat = all_zero(reinterpret_cast<const scalar_t*>(host.data()), n); });
+    return flat;
 }
 
 /**

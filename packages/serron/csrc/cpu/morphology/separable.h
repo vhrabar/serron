@@ -1,7 +1,9 @@
 #ifndef SERRON_CPU_MORPHOLOGY_SEPARABLE_H
 #define SERRON_CPU_MORPHOLOGY_SEPARABLE_H
 
+#include <ATen/Dispatch.h>
 #include <ATen/core/Tensor.h>
+#include <compat/flatness.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -28,19 +30,25 @@ inline int64_t separable_min_k() {
 }
 
 /**
- * True when @p kernel_c is a flat SE
+ * True when @p kernel_c is a flat SE.
+ *
+ * Scans the tensor's own memory, which is already host memory here.
+ *
+ * @param kernel_c  Contiguous structuring element on the CPU.
  */
 inline bool se_is_flat(const at::Tensor& kernel_c) {
-    return kernel_c.eq(0).all().item<bool>();
+    bool flat = false;
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, kernel_c.scalar_type(),
+                                    "serron_se_is_flat_cpu",
+                                    [&] { flat = all_zero(kernel_c.data_ptr<scalar_t>(), kernel_c.numel()); });
+    return flat;
 }
 
 /**
  * Flatness of @p kernel_c, taking the caller's answer when it has one.
  *
- * @ref se_is_flat reads a device-side reduction back to the host, which synchronises. The
- * Python layer caches flatness per structuring element and passes it down, so @p flat is
- * normally set and no synchronisation happens; @c std::nullopt keeps the direct check for
- * callers that go at the operator without it.
+ * The Python layer caches flatness per structuring element and passes it down, so @p flat is normally set and
+ * nothing is read; @c std::nullopt keeps the direct check for callers that go at the operator without it.
  *
  * @param flat      Caller's answer, or @c std::nullopt to check @p kernel_c directly.
  * @param kernel_c  Contiguous structuring element.

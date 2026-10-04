@@ -120,6 +120,7 @@ endif()
 set(_serron_headers
         csrc/ops.h
         csrc/compat/acc_type.h
+        csrc/compat/flatness.h
         csrc/compat/grain_size.h
         csrc/compat/registration.h
         csrc/cpu/utils/boundaries.h
