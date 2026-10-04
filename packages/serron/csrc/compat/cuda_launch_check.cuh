@@ -12,11 +12,11 @@
  * reported asynchronously, so this only catches configuration errors (bad grid or block size, too much shared
  * memory); a fault inside the kernel surfaces at the next synchronisation.
  */
-#define SERRON_CUDA_KERNEL_LAUNCH_CHECK()                                                                            \
-    do {                                                                                                             \
-        const cudaError_t serron_launch_status_ = cudaGetLastError();                                                 \
-        STD_TORCH_CHECK(serron_launch_status_ == cudaSuccess, "CUDA kernel launch failed: ",                          \
-                        cudaGetErrorString(serron_launch_status_));                                                   \
+#define SERRON_CUDA_KERNEL_LAUNCH_CHECK()                                                                              \
+    do {                                                                                                               \
+        const cudaError_t serron_launch_status_ = cudaGetLastError();                                                  \
+        STD_TORCH_CHECK(serron_launch_status_ == cudaSuccess,                                                          \
+                        "CUDA kernel launch failed: ", cudaGetErrorString(serron_launch_status_));                     \
     } while (0)
 
 #endif // SERRON_COMPAT_CUDA_LAUNCH_CHECK_CUH
