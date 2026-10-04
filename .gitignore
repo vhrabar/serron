@@ -54,7 +54,7 @@ cmake-build-*/
 
 .vscode/
 .idea/
-.run/
+# .run/ holds shared run configurations and is tracked; .idea/ is per-developer workspace state.
 
 # -------------------------
 # GitHub Actions artifacts

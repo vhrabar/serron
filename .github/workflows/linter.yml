@@ -28,16 +28,16 @@ jobs:
       - name: Install dev dependencies
         run: uv sync --no-install-project --no-install-workspace --no-group cu132 --group cpu
 
-     # run formatters and linters
+     # run formatters and linters; scripts/lint.sh is shared with the .run/ configurations
       - name: Ruff format
-        run: uv run --no-sync ruff format --check .
+        run: scripts/lint.sh ruff-format
 
       - name: Ruff lint
-        run: uv run --no-sync ruff check --output-format=github .
+        run: scripts/lint.sh ruff-check
 
       # Pyrefly static type checker
       - name: Pyrefly
-        run: uv run --no-sync pyrefly check --output-format=full-text-with-github
+        run: scripts/lint.sh pyrefly
 
   # The release workflows read and rewrite CHANGELOG.md, so it has to stay in keep-a-changelog format.
   changelog:
@@ -85,10 +85,4 @@ jobs:
 
      # Clang-format
       - name: Check C++/CUDA formatting
-        run: |
-          FILES=$(git ls-files | grep -E '\.(cpp|cc|cxx|h|hpp|cu|cuh)$' || true)
-          if [ -n "$FILES" ]; then
-            uvx clang-format@18.1.8 --dry-run --Werror $FILES
-          else
-            echo "No C++/CUDA files to check."
-          fi
+        run: scripts/lint.sh clang-format
