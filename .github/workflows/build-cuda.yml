@@ -86,7 +86,7 @@ jobs:
 
       # Installs project dependencies
       - name: Install build dependencies
-        run: uv sync --package serron --no-dev --group build --no-install-workspace --extra cu132
+        run: uv sync --no-install-workspace
 
       # Build CUDA extension
       - name: Compile CUDA extension

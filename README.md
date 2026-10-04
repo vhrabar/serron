@@ -197,13 +197,13 @@ cd serron
 
 ### Choosing a torch build
 
-`torch` is pulled from a specific wheel index via mutually-exclusive extras. Pick the
-one matching your machine, plain `uv sync` (no extra) falls back to the default
-CUDA-enabled wheel from PyPI:
+`torch` is pulled from a specific wheel index via mutually-exclusive dependency groups.
+`cu132` is enabled by default, so plain `uv sync` gives the CUDA 13.2 build; swap it for
+`cpu` on a machine without a GPU:
 
 ```bash
-uv sync --extra cu132   # CUDA 13.2 build
-uv sync --extra cpu     # CPU-only build
+uv sync                              # CUDA 13.2 build
+uv sync --no-group cu132 --group cpu # CPU-only build
 ```
 
 ### Building the wheel
@@ -211,7 +211,7 @@ uv sync --extra cpu     # CPU-only build
 Building the CUDA extension from source needs the CUDA 13.X toolkit (`nvcc`):
 
 ```bash
-uv sync --package serron --no-dev --group build --extra cu132
+uv sync --no-install-workspace
 uv build --package serron --wheel --no-build-isolation
 ```
 
@@ -219,7 +219,7 @@ On a GPU-less machine, sync the CPU torch build instead; the extension then buil
 C++ only (no `nvcc` required):
 
 ```bash
-uv sync --package serron --no-dev --group build --extra cpu
+uv sync --no-install-workspace --no-group cu132 --group cpu
 uv build --package serron --wheel --no-build-isolation
 ```
 

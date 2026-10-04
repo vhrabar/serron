@@ -3,39 +3,52 @@ name = "serron-workspace"
 version = "0"
 dependencies = [
     "kornia>=0.8.3",
-    "scikit-build-core>=1.0.3",
-    "scipy-stubs~=1.18.1",
+    "scikit-build-core==1.1.1",
+    "scipy-stubs~=1.18.1.1",
     "serron",
+    "torch==2.14.1",
 ]
 
-[project.optional-dependencies]
-cpu = ["serron[cpu]"]
-cu132 = ["serron[cu132]"]
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
+[[tool.uv.index]]
+name = "pytorch-cu132"
+url = "https://download.pytorch.org/whl/cu132"
+explicit = true
 
 [tool.uv.workspace]
 members = ["packages/*"]
 
 [tool.uv.sources]
 serron = { workspace = true }
+torch = [
+    { index = "pytorch-cpu", group = "cpu" },
+    { index = "pytorch-cu132", group = "cu132" },
+]
 
 [dependency-groups]
 dev = [
     "pytest",
     "pytest-benchmark",
-    "ruff",
-    "mypy",
-    "scikit-build-core==1.0.3",
-    "cmake",
-    "ninja"
+    "ruff==0.16.10",
+    "pyrefly",
+    "scikit-build-core",
+    "cmake==4.4.4",
+    "ninja",
 ]
+cpu = ["torch>=2.14,<2.15"]
+cu132 = ["torch>=2.14,<2.15"]
 
 [tool.uv]
 no-build-isolation-package = ["serron"]
+default-groups = ["dev", "cu132"]
 conflicts = [
     [
-        { package = "serron", extra = "cpu" },
-        { package = "serron", extra = "cu132" },
+        { group = "cpu" },
+        { group = "cu132" },
     ],
 ]
 
@@ -85,21 +98,14 @@ indent-style          = "space"
 docstring-code-format = true
 
 
-[tool.mypy]
-python_version       = "3.12"
-mypy_path            = "src"
-exclude              = ["^attn-bench/", "^build/", "^dist/", "/build/"]
-strict               = true
-warn_unused_ignores  = true
-warn_redundant_casts = true
-warn_unused_configs  = true
-show_error_codes     = true
-pretty               = true
+[tool.pyrefly]
+preset            = "strict"
+python-version    = "3.12"
+search-path       = [".", "packages/serron/torch-ext"]
+project-excludes  = ["**/build/**", "dist/**", "cmake-build-*/**", "**/.venv/**"]
+ignore-missing-imports = ["cupy", "cupyx.*"]
 
-
-[[tool.mypy.overrides]]
-module = [
-    "cupy",
-    "cupyx.*",
-]
-ignore_missing_imports = true
+[tool.pyrefly.errors]
+# Lambda parameters cannot be annotated, so this only forces lambdas to be rewritten as defs.
+implicit-any-lambda = false
+unused-ignore = true

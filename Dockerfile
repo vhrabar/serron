@@ -37,12 +37,12 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 COPY packages/serron/pyproject.toml packages/serron/pyproject.toml
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --extra cu132 --no-install-workspace
+    uv sync --frozen --no-install-workspace
 
 # Stage II: Build
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --extra cu132 --no-editable
+    uv sync --frozen --no-editable
 
 RUN userdel --remove ubuntu 2>/dev/null || true \
     && useradd --create-home --uid 1000 app \

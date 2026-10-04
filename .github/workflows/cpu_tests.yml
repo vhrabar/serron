@@ -35,7 +35,7 @@ jobs:
 
       # CPU-only build
       - name: Sync (CPU torch + build + dev tools)
-        run: uv sync --extra cpu
+        run: uv sync --no-group cu132 --group cpu
 
       # CUDA-only tests
       - name: Run tests

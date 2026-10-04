@@ -58,10 +58,6 @@ dependencies = [
     "torch>=2.14,<2.15",
 ]
 
-[project.optional-dependencies]
-cpu = ["torch>=2.14,<2.15"]
-cu132 = ["torch>=2.14,<2.15"]
-
 [project.urls]
 Homepage = "https://github.com/vhrabar/serron"
 Source = "https://github.com/vhrabar/serron"
@@ -70,31 +66,13 @@ Changelog = "https://github.com/vhrabar/serron/blob/main/CHANGELOG.md"
 "Bug Tracker" = "https://github.com/vhrabar/serron/issues"
 
 
-[[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
-
-[[tool.uv.index]]
-name = "pytorch-cu132"
-url = "https://download.pytorch.org/whl/cu132"
-explicit = true
-
-
-[tool.uv.sources]
-torch = [
-    { index = "pytorch-cpu", extra = "cpu" },
-    { index = "pytorch-cu132", extra = "cu132" },
-]
-
-
 [build-system]
-requires = ["scikit-build-core==1.0.3"]
+requires = ["scikit-build-core==1.1.1"]
 build-backend = "scikit_build_core.build"
 
 
 [dependency-groups]
-build = ["scikit-build-core==1.0.3", "cmake", "ninja"]
+build = ["scikit-build-core==1.1.1", "cmake", "ninja"]
 
 
 
