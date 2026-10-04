@@ -1,15 +1,18 @@
 #ifndef SERRON_CPU_MORPHOLOGY_SEPARABLE_H
 #define SERRON_CPU_MORPHOLOGY_SEPARABLE_H
 
-#include <ATen/Dispatch.h>
-#include <ATen/core/Tensor.h>
 #include <compat/flatness.h>
+#include <torch/csrc/stable/tensor.h>
+#include <torch/headeronly/core/Dispatch_v2.h>
+#include <torch/headeronly/core/ScalarType.h>
 
 #include <algorithm>
 #include <cstdlib>
 #include <optional>
 
 namespace serron {
+
+using torch::stable::Tensor;
 
 /**
  * Window length at which the separable r+c path is preferred over the direct 2-D kernel, for a flat, axis-separable
@@ -36,11 +39,12 @@ inline int64_t separable_min_k() {
  *
  * @param kernel_c  Contiguous structuring element on the CPU.
  */
-inline bool se_is_flat(const at::Tensor& kernel_c) {
+inline bool se_is_flat(const Tensor& kernel_c) {
     bool flat = false;
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, kernel_c.scalar_type(),
-                                    "serron_se_is_flat_cpu",
-                                    [&] { flat = all_zero(kernel_c.data_ptr<scalar_t>(), kernel_c.numel()); });
+    THO_DISPATCH_V2(kernel_c.scalar_type(), "serron_se_is_flat_cpu",
+                    AT_WRAP([&] { flat = all_zero(kernel_c.const_data_ptr<scalar_t>(), kernel_c.numel()); }),
+                    torch::headeronly::ScalarType::Float, torch::headeronly::ScalarType::Double,
+                    torch::headeronly::ScalarType::Half, torch::headeronly::ScalarType::BFloat16);
     return flat;
 }
 
@@ -53,7 +57,7 @@ inline bool se_is_flat(const at::Tensor& kernel_c) {
  * @param flat      Caller's answer, or @c std::nullopt to check @p kernel_c directly.
  * @param kernel_c  Contiguous structuring element.
  */
-inline bool resolve_flat(const std::optional<bool>& flat, const at::Tensor& kernel_c) {
+inline bool resolve_flat(const std::optional<bool>& flat, const Tensor& kernel_c) {
     return flat.has_value() ? *flat : se_is_flat(kernel_c);
 }
 

@@ -5,11 +5,12 @@
 #include <cpu/morphology/separable.h>
 #include <cpu/utils/boundaries.h>
 
-#include <ATen/Dispatch.h>
-#include <ATen/Parallel.h>
-#include <c10/util/Exception.h>
 #include <compat/acc_type.h>
 #include <compat/grain_size.h>
+#include <torch/csrc/stable/ops.h>
+#include <torch/headeronly/core/Dispatch_v2.h>
+#include <torch/headeronly/core/ScalarType.h>
+#include <torch/headeronly/util/Exception.h>
 
 #include <cmath>
 #include <cstdint>
@@ -29,7 +30,7 @@ namespace {
  * upstream gradient to that selected location. The winning tap is recomputed with
  * the same @c tap / @c reduce / tie-break as the forward pass so the input-grad
  * and SE-grad target the same tap. Each output element is independent, so the
- * search runs under @c at::parallel_for.
+ * search runs under @c torch::stable::parallel_for.
  *
  * @tparam scalar_t              Element type of the tensors; the reduction accumulates in acc_type<scalar_t>.
  * @tparam Op                    Operation policy (@ref ErodeOp or @ref DilateOp).
@@ -53,7 +54,7 @@ void morphology_backward_winners(const scalar_t* input, const scalar_t* kernel, 
     const int64_t total = N * C * H * W;
     const auto neutral = Op::template neutral<acc_t>();
 
-    at::parallel_for(0, total, kGrainSize, [&](const int64_t begin, const int64_t end) {
+    torch::stable::parallel_for(0, total, kGrainSize, [&](const int64_t begin, const int64_t end) {
         for (int64_t idx = begin; idx < end; ++idx) {
             const int64_t w = idx % W;
             const int64_t h = (idx / W) % H;
@@ -145,7 +146,7 @@ void argreduce_lines(Read read, Write write, const int64_t lines, const int64_t 
     const auto neutral = Op::template neutral<acc_t>();
     const int64_t grain = std::max<int64_t>(1, kGrainSize / std::max<int64_t>(line_len, 1));
 
-    at::parallel_for(0, lines, grain, [&](const int64_t begin, const int64_t end) {
+    torch::stable::parallel_for(0, lines, grain, [&](const int64_t begin, const int64_t end) {
         std::vector<ArgTap<acc_t>> samples(static_cast<size_t>(padded));
         std::vector<ArgTap<acc_t>> prefix(static_cast<size_t>(padded));
         std::vector<ArgTap<acc_t>> suffix(static_cast<size_t>(padded));
@@ -292,6 +293,32 @@ void morphology_backward_cpu(const scalar_t* grad_output, const scalar_t* input,
 }
 
 /**
+ * Runs the dtype-specialised backward kernel selected by @p op.
+ *
+ * Hoisted out of the dispatch macro deliberately: THO_DISPATCH_V2's body cannot contain an unprotected comma, and
+ * the one in @c morphology_backward_cpu<scalar_t, ErodeOp> would be taken as a macro argument separator.
+ */
+template <typename scalar_t>
+void morphology_backward_cpu_for(const MorphOp op, const scalar_t* grad_output, const scalar_t* input,
+                                 const scalar_t* kernel, scalar_t* grad_input, scalar_t* grad_kernel,
+                                 const bool use_separable, const int64_t N, const int64_t C, const int64_t H,
+                                 const int64_t W, const int64_t kH, const int64_t kW,
+                                 const int64_t kernel_channel_stride, const BorderMode border,
+                                 const bool need_kernel_grad) {
+    switch (op) {
+    case MorphOp::kErode:
+        morphology_backward_cpu<scalar_t, ErodeOp>(grad_output, input, kernel, grad_input, grad_kernel, use_separable,
+                                                   N, C, H, W, kH, kW, kernel_channel_stride, border, need_kernel_grad);
+        break;
+    case MorphOp::kDilate:
+        morphology_backward_cpu<scalar_t, DilateOp>(grad_output, input, kernel, grad_input, grad_kernel, use_separable,
+                                                    N, C, H, W, kH, kW, kernel_channel_stride, border,
+                                                    need_kernel_grad);
+        break;
+    }
+}
+
+/**
  * Shared host-side backward behind @ref erode_backward_cpu / @ref dilate_backward_cpu.
  *
  * CPU mirror of the CUDA @c morphology_backward_impl: validates the inputs, normalises the structuring-element layout,
@@ -304,27 +331,29 @@ void morphology_backward_cpu(const scalar_t* grad_output, const scalar_t* input,
  * @param op           Operation to differentiate (@ref MorphOp).
  * @param name         Qualified caller name used to prefix diagnostics.
  * @return             Pair (grad_input, grad_kernel) matching the shapes of @p input and @p kernel.
- * @throws c10::Error  if the tensors are not on CPU, have the wrong rank or dtype, the channel counts disagree, or @p
- * border is out of range.
+ * @throws std::runtime_error  if the tensors are not on CPU, have the wrong rank or dtype, the channel counts disagree,
+ * or @p border is out of range.
  */
-std::tuple<at::Tensor, at::Tensor> morphology_backward_impl(const at::Tensor& grad_output, const at::Tensor& input,
-                                                            const at::Tensor& kernel, int64_t border,
-                                                            const std::optional<bool>& flat, bool need_kernel_grad,
-                                                            MorphOp op, const char* name) {
-    TORCH_CHECK(grad_output.is_cpu(), name, ": grad_output must be a CPU tensor");
-    TORCH_CHECK(input.is_cpu(), name, ": input must be a CPU tensor");
-    TORCH_CHECK(kernel.is_cpu(), name, ": kernel must be a CPU tensor");
-    TORCH_CHECK(input.dim() == 4, name, ": input must be 4-D (N, C, H, W), got ", input.dim(), "-D");
-    TORCH_CHECK(grad_output.dim() == 4, name, ": grad_output must be 4-D (N, C, H, W), got ", grad_output.dim(), "-D");
-    TORCH_CHECK(kernel.dim() == 2 || kernel.dim() == 3, name, ": kernel must be 2-D (kH, kW) or 3-D (C, kH, kW), got ",
-                kernel.dim(), "-D");
-    TORCH_CHECK(input.scalar_type() == kernel.scalar_type(), name, ": input and kernel must share a dtype");
-    TORCH_CHECK(grad_output.scalar_type() == input.scalar_type(), name, ": grad_output and input must share a dtype");
-    TORCH_CHECK(border >= kReflect && border <= kConstant, name, ": invalid border mode ", border);
+std::tuple<Tensor, Tensor> morphology_backward_impl(const Tensor& grad_output, const Tensor& input,
+                                                    const Tensor& kernel, int64_t border,
+                                                    const std::optional<bool>& flat, bool need_kernel_grad, MorphOp op,
+                                                    const char* name) {
+    STD_TORCH_CHECK(grad_output.is_cpu(), name, ": grad_output must be a CPU tensor");
+    STD_TORCH_CHECK(input.is_cpu(), name, ": input must be a CPU tensor");
+    STD_TORCH_CHECK(kernel.is_cpu(), name, ": kernel must be a CPU tensor");
+    STD_TORCH_CHECK(input.dim() == 4, name, ": input must be 4-D (N, C, H, W), got ", input.dim(), "-D");
+    STD_TORCH_CHECK(grad_output.dim() == 4, name, ": grad_output must be 4-D (N, C, H, W), got ", grad_output.dim(),
+                    "-D");
+    STD_TORCH_CHECK(kernel.dim() == 2 || kernel.dim() == 3, name,
+                    ": kernel must be 2-D (kH, kW) or 3-D (C, kH, kW), got ", kernel.dim(), "-D");
+    STD_TORCH_CHECK(input.scalar_type() == kernel.scalar_type(), name, ": input and kernel must share a dtype");
+    STD_TORCH_CHECK(grad_output.scalar_type() == input.scalar_type(), name,
+                    ": grad_output and input must share a dtype");
+    STD_TORCH_CHECK(border >= kReflect && border <= kConstant, name, ": invalid border mode ", border);
 
-    const at::Tensor grad_output_c = grad_output.contiguous();
-    const at::Tensor input_c = input.contiguous();
-    const at::Tensor kernel_c = kernel.contiguous();
+    const Tensor grad_output_c = torch::stable::contiguous(grad_output);
+    const Tensor input_c = torch::stable::contiguous(input);
+    const Tensor kernel_c = torch::stable::contiguous(kernel);
 
     const int64_t N = input_c.size(0);
     const int64_t C = input_c.size(1);
@@ -335,8 +364,8 @@ std::tuple<at::Tensor, at::Tensor> morphology_backward_impl(const at::Tensor& gr
     int64_t kW = 0;
     int64_t kernel_channel_stride = 0;
     if (kernel_c.dim() == 3) {
-        TORCH_CHECK(kernel_c.size(0) == C, name, ": kernel channel dim (", kernel_c.size(0),
-                    ") must match input channels (", C, ")");
+        STD_TORCH_CHECK(kernel_c.size(0) == C, name, ": kernel channel dim (", kernel_c.size(0),
+                        ") must match input channels (", C, ")");
         kH = kernel_c.size(1);
         kW = kernel_c.size(2);
         kernel_channel_stride = kH * kW;
@@ -345,37 +374,26 @@ std::tuple<at::Tensor, at::Tensor> morphology_backward_impl(const at::Tensor& gr
         kW = kernel_c.size(1);
         kernel_channel_stride = 0;
     }
-    TORCH_CHECK(kH > 0 && kW > 0, name, ": kernel spatial dims must be positive");
-    TORCH_CHECK(grad_output_c.sizes() == input_c.sizes(), name, ": grad_output shape must match input");
+    STD_TORCH_CHECK(kH > 0 && kW > 0, name, ": kernel spatial dims must be positive");
+    STD_TORCH_CHECK(grad_output_c.sizes() == input_c.sizes(), name, ": grad_output shape must match input");
 
-    at::Tensor grad_input = at::zeros_like(input_c);
-    at::Tensor grad_kernel = at::zeros_like(kernel_c);
+    Tensor grad_input = torch::stable::new_zeros(input_c, input_c.sizes());
+    Tensor grad_kernel = torch::stable::new_zeros(kernel_c, kernel_c.sizes());
     if (input_c.numel() == 0)
         return {grad_input, grad_kernel};
 
     const bool use_separable = use_separable_path(resolve_flat(flat, kernel_c), kH, kW);
     const auto border_mode = static_cast<BorderMode>(border);
 
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-        at::ScalarType::Half, at::ScalarType::BFloat16, input_c.scalar_type(), "serron_morphology_backward_cpu", [&] {
-            const scalar_t* grad_output_ptr = grad_output_c.data_ptr<scalar_t>();
-            const scalar_t* input_ptr = input_c.data_ptr<scalar_t>();
-            const scalar_t* kernel_ptr = kernel_c.data_ptr<scalar_t>();
-            auto* grad_input_ptr = grad_input.data_ptr<scalar_t>();
-            auto* grad_kernel_ptr = grad_kernel.data_ptr<scalar_t>();
-            switch (op) {
-            case MorphOp::kErode:
-                morphology_backward_cpu<scalar_t, ErodeOp>(grad_output_ptr, input_ptr, kernel_ptr, grad_input_ptr,
-                                                           grad_kernel_ptr, use_separable, N, C, H, W, kH, kW,
-                                                           kernel_channel_stride, border_mode, need_kernel_grad);
-                break;
-            case MorphOp::kDilate:
-                morphology_backward_cpu<scalar_t, DilateOp>(grad_output_ptr, input_ptr, kernel_ptr, grad_input_ptr,
-                                                            grad_kernel_ptr, use_separable, N, C, H, W, kH, kW,
-                                                            kernel_channel_stride, border_mode, need_kernel_grad);
-                break;
-            }
-        });
+    THO_DISPATCH_V2(input_c.scalar_type(), "serron_morphology_backward_cpu", AT_WRAP([&] {
+                        morphology_backward_cpu_for<scalar_t>(
+                            op, grad_output_c.const_data_ptr<scalar_t>(), input_c.const_data_ptr<scalar_t>(),
+                            kernel_c.const_data_ptr<scalar_t>(), grad_input.mutable_data_ptr<scalar_t>(),
+                            grad_kernel.mutable_data_ptr<scalar_t>(), use_separable, N, C, H, W, kH, kW,
+                            kernel_channel_stride, border_mode, need_kernel_grad);
+                    }),
+                    torch::headeronly::ScalarType::Float, torch::headeronly::ScalarType::Double,
+                    torch::headeronly::ScalarType::Half, torch::headeronly::ScalarType::BFloat16);
 
     return {grad_input, grad_kernel};
 }
@@ -391,9 +409,9 @@ std::tuple<at::Tensor, at::Tensor> morphology_backward_impl(const at::Tensor& gr
  * @param border       Boundary mode (@ref BorderMode) used in the forward pass.
  * @return             Pair (grad_input, grad_kernel) matching the shapes of @p input and @p kernel.
  */
-std::tuple<at::Tensor, at::Tensor> erode_backward_cpu(const at::Tensor& grad_output, const at::Tensor& input,
-                                                      const at::Tensor& kernel, const int64_t border,
-                                                      const std::optional<bool>& flat, const bool need_kernel_grad) {
+std::tuple<Tensor, Tensor> erode_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& kernel,
+                                              const int64_t border, const std::optional<bool>& flat,
+                                              const bool need_kernel_grad) {
     return morphology_backward_impl(grad_output, input, kernel, border, flat, need_kernel_grad, MorphOp::kErode,
                                     "serron::erode_backward");
 }
@@ -407,9 +425,9 @@ std::tuple<at::Tensor, at::Tensor> erode_backward_cpu(const at::Tensor& grad_out
  * @param border       Boundary mode (@ref BorderMode) used in the forward pass.
  * @return             Pair (grad_input, grad_kernel) matching the shapes of @p input and @p kernel.
  */
-std::tuple<at::Tensor, at::Tensor> dilate_backward_cpu(const at::Tensor& grad_output, const at::Tensor& input,
-                                                       const at::Tensor& kernel, const int64_t border,
-                                                       const std::optional<bool>& flat, const bool need_kernel_grad) {
+std::tuple<Tensor, Tensor> dilate_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& kernel,
+                                               const int64_t border, const std::optional<bool>& flat,
+                                               const bool need_kernel_grad) {
     return morphology_backward_impl(grad_output, input, kernel, border, flat, need_kernel_grad, MorphOp::kDilate,
                                     "serron::dilate_backward");
 }

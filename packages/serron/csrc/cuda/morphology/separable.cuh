@@ -5,11 +5,12 @@
 
 #include <cuda_runtime.h>
 
-#include <ATen/Dispatch.h>
-#include <ATen/core/Tensor.h>
-#include <ATen/cuda/CUDAContext.h>
-#include <c10/util/Exception.h>
 #include <compat/flatness.h>
+#include <torch/csrc/stable/accelerator.h>
+#include <torch/csrc/stable/tensor.h>
+#include <torch/headeronly/core/Dispatch_v2.h>
+#include <torch/headeronly/core/ScalarType.h>
+#include <torch/headeronly/util/Exception.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -17,6 +18,8 @@
 #include <vector>
 
 namespace serron {
+
+using torch::stable::Tensor;
 
 /**
  * Window length at which the separable r+c path is preferred over the tiled/GMEM 2-D kernels, for a flat,
@@ -61,7 +64,7 @@ inline int64_t line_chunks_per_block(const int64_t k, const int64_t line_len, co
 
 /// Throws when @p status reports a failure, naming @p what.
 inline void check_cuda(const cudaError_t status, const char* what) {
-    TORCH_CHECK(status == cudaSuccess, "serron: ", what, " failed: ", cudaGetErrorString(status));
+    STD_TORCH_CHECK(status == cudaSuccess, "serron: ", what, " failed: ", cudaGetErrorString(status));
 }
 
 /**
@@ -73,22 +76,24 @@ inline void check_cuda(const cudaError_t status, const char* what) {
  *
  * @param kernel_c  Contiguous structuring element on a CUDA device.
  */
-inline bool se_is_flat(const at::Tensor& kernel_c) {
+inline bool se_is_flat(const Tensor& kernel_c) {
     const int64_t n = kernel_c.numel();
     if (n == 0) {
         return true;
     }
 
     std::vector<char> host(static_cast<size_t>(n) * static_cast<size_t>(kernel_c.element_size()));
-    const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+    const auto stream = static_cast<cudaStream_t>(
+        torch::stable::accelerator::getCurrentStream(kernel_c.get_device_index()).nativeHandle());
     check_cuda(cudaMemcpyAsync(host.data(), kernel_c.const_data_ptr(), host.size(), cudaMemcpyDeviceToHost, stream),
                "structuring-element copy");
     check_cuda(cudaStreamSynchronize(stream), "structuring-element copy sync");
 
     bool flat = false;
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, kernel_c.scalar_type(),
-                                    "serron_se_is_flat_cuda",
-                                    [&] { flat = all_zero(reinterpret_cast<const scalar_t*>(host.data()), n); });
+    THO_DISPATCH_V2(kernel_c.scalar_type(), "serron_se_is_flat_cuda",
+                    AT_WRAP([&] { flat = all_zero(reinterpret_cast<const scalar_t*>(host.data()), n); }),
+                    torch::headeronly::ScalarType::Float, torch::headeronly::ScalarType::Double,
+                    torch::headeronly::ScalarType::Half, torch::headeronly::ScalarType::BFloat16);
     return flat;
 }
 
@@ -98,7 +103,7 @@ inline bool se_is_flat(const at::Tensor& kernel_c) {
  * @param flat      Caller's answer, or @c std::nullopt to check @p kernel_c directly.
  * @param kernel_c  Contiguous structuring element.
  */
-inline bool resolve_flat(const std::optional<bool>& flat, const at::Tensor& kernel_c) {
+inline bool resolve_flat(const std::optional<bool>& flat, const Tensor& kernel_c) {
     return flat.has_value() ? *flat : se_is_flat(kernel_c);
 }
 

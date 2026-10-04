@@ -47,22 +47,23 @@ def public_op(name: str, input_: torch.Tensor, kernel: torch.Tensor) -> torch.Te
 
 
 @pytest.mark.parametrize("op", PRIMITIVES)
-def test_all_fp32_is_not_downcast(op: str, device: torch.device, rng: torch.Generator) -> None:
+def test_fp32_runs_in_the_lower_precision_dtype(op: str, device: torch.device, rng: torch.Generator) -> None:
     """
-    float32 in, float32 out, bit-for-bit the same as outside autocast.
+    float32 arguments are cast down, so the result comes back in the lower-precision dtype.
 
-    ``promote_type`` prefers float32 over the lower-precision dtype, so autocast is a no-op here. This is the
-    behaviour a fixed ``cast_inputs`` would change.
+    Up to 0.4.0 this case stayed in float32, because ``promote_type`` preferred float32 over the lower-precision
+    dtype. The result now matches running the operator on explicitly cast arguments.
     """
+    low = low_precision_dtype(device)
     x = make_image(rng, (1, 1, 12, 12), dtype=torch.float32, device=device)
     k = flat_se(1, shared=True, dtype=torch.float32, device=device)
 
-    with torch.autocast(device_type=device.type, dtype=low_precision_dtype(device)):
+    with torch.autocast(device_type=device.type, dtype=low):
         under = public_op(op, x, k)
-    outside = public_op(op, x, k)
+    explicit = public_op(op, x.to(low), k.to(low))
 
-    assert under.dtype == torch.float32
-    assert torch.equal(under, outside)
+    assert under.dtype == low
+    assert torch.equal(under, explicit)
 
 
 @pytest.mark.parametrize("op", PRIMITIVES)
@@ -82,13 +83,14 @@ def test_low_precision_inputs_stay_low(op: str, device: torch.device, rng: torch
 
 @pytest.mark.parametrize("op", PRIMITIVES)
 @pytest.mark.parametrize("low_arg", ["input", "kernel"])
-def test_mixed_precision_promotes_to_fp32(op: str, low_arg: str, device: torch.device, rng: torch.Generator) -> None:
+def test_mixed_precision_casts_down(op: str, low_arg: str, device: torch.device, rng: torch.Generator) -> None:
     """
-    One argument low precision and one float32 promotes the whole op to float32, not down to the low dtype.
+    One argument low precision and one float32 runs the whole op in the low dtype. Up to 0.4.0 it promoted to
+    float32 instead.
 
-    This is also what proves the autocast kernel is registered at all: the operator itself requires a shared
-    dtype, so the same call outside autocast raises. Tests that only check matching dtypes would still pass with
-    the registration removed.
+    This is also what proves the registration is live at all: the operator itself requires a shared dtype, so the
+    same call outside autocast raises. Tests that only check matching dtypes would still pass with the
+    registration removed.
     """
     low = low_precision_dtype(device)
     x_dtype = low if low_arg == "input" else torch.float32
@@ -98,7 +100,7 @@ def test_mixed_precision_promotes_to_fp32(op: str, low_arg: str, device: torch.d
     k = flat_se(1, shared=True, dtype=k_dtype, device=device)
 
     with torch.autocast(device_type=device.type, dtype=low):
-        assert raw_op(op, x, k).dtype == torch.float32
+        assert raw_op(op, x, k).dtype == low
 
     with pytest.raises(RuntimeError, match="share a dtype"):
         raw_op(op, x, k)
@@ -106,7 +108,10 @@ def test_mixed_precision_promotes_to_fp32(op: str, low_arg: str, device: torch.d
 
 @pytest.mark.parametrize("op", PRIMITIVES)
 def test_double_is_left_alone(op: str, device: torch.device, rng: torch.Generator) -> None:
-    """``promote_type`` ignores float64 arguments, and float64 is never cast down."""
+    """
+    float64 is never cast down, which torch's autocast cast helper guarantees by skipping it. Unlike the float32
+    case this survived the move to ``register_autocast`` unchanged.
+    """
     x = make_image(rng, (1, 1, 12, 12), dtype=torch.float64, device=device)
     k = flat_se(1, shared=True, dtype=torch.float64, device=device)
 
@@ -140,19 +145,21 @@ def test_public_api_matches_dtypes_before_the_op_sees_them(op: str, device: torc
 
 
 @pytest.mark.parametrize("op", PRIMITIVES)
-def test_autocast_dtype_unlike_the_input_dtype_is_rejected(op: str, device: torch.device, rng: torch.Generator) -> None:
+def test_registered_dtype_wins_over_the_autocast_dtype(op: str, device: torch.device, rng: torch.Generator) -> None:
     """
-    Low-precision inputs under a *different* low-precision autocast dtype are an error, because
-    ``at::autocast::prioritize`` has no rule for the pair.
+    The dtype is the one fixed at registration, not the one the enclosing ``torch.autocast`` asks for.
+
+    Up to 0.4.0 the C++ kernels read the ambient autocast dtype, and this pairing raised outright because
+    ``at::autocast::prioritize`` had no rule for two different low-precision types.
     """
     low = low_precision_dtype(device)
     other = torch.bfloat16 if low is torch.float16 else torch.float16
 
-    x = make_image(rng, (1, 1, 12, 12), dtype=low, device=device)
-    k = flat_se(1, shared=True, dtype=low, device=device)
+    x = make_image(rng, (1, 1, 12, 12), dtype=torch.float32, device=device)
+    k = flat_se(1, shared=True, dtype=torch.float32, device=device)
 
-    with torch.autocast(device_type=device.type, dtype=other), pytest.raises(RuntimeError, match="ScalarType"):
-        raw_op(op, x, k)
+    with torch.autocast(device_type=device.type, dtype=other):
+        assert raw_op(op, x, k).dtype == low
 
 
 # --------------------------------------------------------------------------- #
@@ -173,7 +180,7 @@ def test_backward_under_autocast_keeps_the_leaf_dtype(op: str, device: torch.dev
         out = public_op(op, x, k)
     out.sum().backward()
 
-    assert out.dtype == torch.float32
+    assert out.dtype == low_precision_dtype(device)
     assert x.grad is not None and x.grad.dtype == torch.float32
     assert k.grad is not None and k.grad.dtype == torch.float32
     assert x.grad.abs().sum() > 0

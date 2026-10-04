@@ -77,7 +77,26 @@ def _load_c_extension() -> None:
         _load(cuda_lib)
 
 
+# autocast per device type
+_AUTOCAST_DTYPES = {"cuda": torch.float16, "cpu": torch.bfloat16}
+
+# FWD -> takes path, BWD -> gets from fwd
+_AUTOCAST_OPS = ("erode", "dilate")
+
+
+def _register_autocast() -> None:
+    """
+    Make the operators participate in ``torch.autocast``.
+
+    The stable ABI has no equivalent of ``at::autocast``, so the ops are registered with the dispatcher instead.
+    """
+    for device_type, dtype in _AUTOCAST_DTYPES.items():
+        for op in _AUTOCAST_OPS:
+            torch.library.register_autocast(f"{_NAMESPACE}::{op}", device_type, dtype)
+
+
 _load_c_extension()
+_register_autocast()
 
 ops = getattr(torch.ops, _NAMESPACE)
 
