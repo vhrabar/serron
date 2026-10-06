@@ -10,11 +10,13 @@
 
 #include <cuda_runtime.h>
 
-#include <ATen/AccumulateType.h>
-#include <ATen/Dispatch.h>
-#include <ATen/cuda/CUDAContext.h>
-#include <c10/cuda/CUDAGuard.h>
-#include <c10/util/Exception.h>
+#include <compat/acc_type.h>
+#include <compat/check.h>
+#include <compat/cuda_launch_check.cuh>
+#include <torch/csrc/stable/accelerator.h>
+#include <torch/csrc/stable/ops.h>
+#include <torch/headeronly/core/Dispatch_v2.h>
+#include <torch/headeronly/core/ScalarType.h>
 
 #include <cmath>
 #include <cstdlib>
@@ -31,7 +33,7 @@ namespace {
  *
  *
  * @tparam scalar_t              Element type of @p input / @p kernel / @p output; the reduction accumulates in
- * at::acc_type<scalar_t>.
+ * acc_type<scalar_t>.
  * @tparam Op                    Operation policy (@ref ErodeOp or @ref DilateOp).
  * @param input                  Input image, contiguous (N, C, H, W).
  * @param kernel                 Structuring element, contiguous (kH, kW) or (C, kH, kW).
@@ -51,7 +53,7 @@ __global__ void morphology_kernel(const scalar_t* __restrict__ input, const scal
                                   scalar_t* __restrict__ output, const int64_t N, const int64_t C, const int64_t H,
                                   const int64_t W, const int64_t kH, const int64_t kW,
                                   const int64_t kernel_channel_stride, const BorderMode border) {
-    using acc_t = at::acc_type<scalar_t, true>;
+    using acc_t = acc_type<scalar_t, true>;
 
     const int64_t idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
     if (idx >= N * C * H * W)
@@ -103,7 +105,7 @@ __global__ void morphology_kernel(const scalar_t* __restrict__ input, const scal
  * Launch config: block = (TILE_X, TILE_Y); grid = (ceil(W/TILE_X), ceil(H/TILE_Y), N*C);
  * dynamic shared memory = (tile_h*tile_w + kH*kW) * sizeof(scalar_t) bytes.
  *
- * @tparam scalar_t              Element type; the reduction accumulates in at::acc_type<scalar_t>.
+ * @tparam scalar_t              Element type; the reduction accumulates in acc_type<scalar_t>.
  * @tparam Op                    Operation policy (@ref ErodeOp or @ref DilateOp).
  * @param input                  Input image, contiguous (N, C, H, W).
  * @param kernel                 Structuring element, contiguous (kH, kW) or (C, kH, kW).
@@ -121,7 +123,7 @@ __global__ void morphology_tiled_kernel(const scalar_t* __restrict__ input, cons
                                         scalar_t* __restrict__ output, const int64_t C, const int64_t H,
                                         const int64_t W, const int64_t kH, const int64_t kW,
                                         const int64_t kernel_channel_stride, const BorderMode border) {
-    using acc_t = at::acc_type<scalar_t, true>;
+    using acc_t = acc_type<scalar_t, true>;
 
     const int64_t anchor_h = kH / 2;
     const int64_t anchor_w = kW / 2;
@@ -188,7 +190,7 @@ enum class LineAxis : int { kRow = 0, kCol = 1 };
 /**
  * Separable line-reduction kernel (van Herk / Gil-Werman)
  *
- * @tparam scalar_t  Element type; the reduction accumulates in at::acc_type<scalar_t>.
+ * @tparam scalar_t  Element type; the reduction accumulates in acc_type<scalar_t>.
  * @tparam Op        Operation policy (@ref ErodeOp or @ref DilateOp); only @c neutral and
  * @c reduce are used.
  * @tparam Axis      @ref LineAxis::kRow reduces along W (contiguous); @ref LineAxis::kCol
@@ -207,7 +209,7 @@ template <typename scalar_t, typename Op, LineAxis Axis>
 __global__ void morphology_line_kernel(const scalar_t* __restrict__ input, scalar_t* __restrict__ output,
                                        const int64_t N, const int64_t C, const int64_t H, const int64_t W,
                                        const int64_t k, const int64_t chunks, const BorderMode border) {
-    using acc_t = at::acc_type<scalar_t, true>;
+    using acc_t = acc_type<scalar_t, true>;
 
     const int64_t line_len = (Axis == LineAxis::kRow) ? W : H;
     const int64_t anchor = k / 2;
@@ -353,6 +355,30 @@ void launch_morphology(const scalar_t* input, const scalar_t* kernel, scalar_t* 
 }
 
 /**
+ * Launches the dtype-specialised kernel selected by @p op.
+ *
+ * Hoisted out of the dispatch macro deliberately: THO_DISPATCH_V2's body cannot contain an unprotected comma, and
+ * neither the one in @c launch_morphology<scalar_t, ErodeOp> nor the ones in a @c <<<>>> launch configuration
+ * survive macro argument splitting.
+ */
+template <typename scalar_t>
+void launch_morphology_for(const MorphOp op, const scalar_t* input, const scalar_t* kernel, scalar_t* output,
+                           scalar_t* scratch, const bool use_separable, const int64_t N, const int64_t C,
+                           const int64_t H, const int64_t W, const int64_t kH, const int64_t kW,
+                           const int64_t kernel_channel_stride, const BorderMode border, cudaStream_t stream) {
+    switch (op) {
+    case MorphOp::kErode:
+        launch_morphology<scalar_t, ErodeOp>(input, kernel, output, scratch, use_separable, N, C, H, W, kH, kW,
+                                             kernel_channel_stride, border, stream);
+        break;
+    case MorphOp::kDilate:
+        launch_morphology<scalar_t, DilateOp>(input, kernel, output, scratch, use_separable, N, C, H, W, kH, kW,
+                                              kernel_channel_stride, border, stream);
+        break;
+    }
+}
+
+/**
  * Shared host-side implementation behind @ref erode and @ref dilate: validates the inputs, normalises the
  * structuring-element layout, then dispatches on dtype and @p op to @ref launch_morphology.
  *
@@ -363,21 +389,21 @@ void launch_morphology(const scalar_t* input, const scalar_t* kernel, scalar_t* 
  * @param op            Operation to apply (@ref MorphOp).
  * @param name          Qualified caller name ("serron::erode") used to prefix diagnostics.
  * @return              Result tensor, same shape and dtype as @p input.
- * @throws c10::Error   if the tensors are not on CUDA, have the wrong rank or dtype, the channel counts disagree, or @p
- * border is out of range.
+ * @throws std::runtime_error   if the tensors are not on CUDA, have the wrong rank or dtype, the channel counts
+ * disagree, or @p border is out of range.
  */
-at::Tensor morphology_impl(const at::Tensor& input, const at::Tensor& kernel, int64_t border,
-                           const std::optional<bool>& flat, MorphOp op, const char* name) {
-    TORCH_CHECK(input.is_cuda(), name, ": input must be a CUDA tensor");
-    TORCH_CHECK(kernel.is_cuda(), name, ": kernel must be a CUDA tensor");
-    TORCH_CHECK(input.dim() == 4, name, ": input must be 4-D (N, C, H, W), got ", input.dim(), "-D");
-    TORCH_CHECK(kernel.dim() == 2 || kernel.dim() == 3, name, ": kernel must be 2-D (kH, kW) or 3-D (C, kH, kW), got ",
-                kernel.dim(), "-D");
-    TORCH_CHECK(input.scalar_type() == kernel.scalar_type(), name, ": input and kernel must share a dtype");
-    TORCH_CHECK(border >= kReflect && border <= kConstant, name, ": invalid border mode ", border);
+Tensor morphology_impl(const Tensor& input, const Tensor& kernel, int64_t border, const std::optional<bool>& flat,
+                       MorphOp op, const char* name) {
+    SERRON_CHECK(input.is_cuda(), name, ": input must be a CUDA tensor");
+    SERRON_CHECK(kernel.is_cuda(), name, ": kernel must be a CUDA tensor");
+    SERRON_CHECK(input.dim() == 4, name, ": input must be 4-D (N, C, H, W), got ", input.dim(), "-D");
+    SERRON_CHECK(kernel.dim() == 2 || kernel.dim() == 3, name, ": kernel must be 2-D (kH, kW) or 3-D (C, kH, kW), got ",
+                 kernel.dim(), "-D");
+    SERRON_CHECK(input.scalar_type() == kernel.scalar_type(), name, ": input and kernel must share a dtype");
+    SERRON_CHECK(border >= kReflect && border <= kConstant, name, ": invalid border mode ", border);
 
-    const at::Tensor input_c = input.contiguous();
-    const at::Tensor kernel_c = kernel.contiguous();
+    const Tensor input_c = torch::stable::contiguous(input);
+    const Tensor kernel_c = torch::stable::contiguous(kernel);
 
     const int64_t N = input_c.size(0);
     const int64_t C = input_c.size(1);
@@ -388,8 +414,8 @@ at::Tensor morphology_impl(const at::Tensor& input, const at::Tensor& kernel, in
     int64_t kW = 0;
     int64_t kernel_channel_stride = 0;
     if (kernel_c.dim() == 3) {
-        TORCH_CHECK(kernel_c.size(0) == C, name, ": kernel channel dim (", kernel_c.size(0),
-                    ") must match input channels (", C, ")");
+        SERRON_CHECK(kernel_c.size(0) == C, name, ": kernel channel dim (", kernel_c.size(0),
+                     ") must match input channels (", C, ")");
         kH = kernel_c.size(1);
         kW = kernel_c.size(2);
         kernel_channel_stride = kH * kW;
@@ -398,39 +424,33 @@ at::Tensor morphology_impl(const at::Tensor& input, const at::Tensor& kernel, in
         kW = kernel_c.size(1);
         kernel_channel_stride = 0;
     }
-    TORCH_CHECK(kH > 0 && kW > 0, name, ": kernel spatial dims must be positive");
+    SERRON_CHECK(kH > 0 && kW > 0, name, ": kernel spatial dims must be positive");
 
-    at::Tensor output = at::empty_like(input_c);
+    Tensor output = torch::stable::empty_like(input_c);
     if (output.numel() == 0)
         return output;
 
     const bool use_separable = use_separable_path(resolve_flat(flat, kernel_c), kH, kW);
-    at::Tensor scratch;
+    Tensor scratch;
     if (use_separable) {
-        scratch = at::empty_like(input_c);
+        scratch = torch::stable::empty_like(input_c);
     }
 
-    const c10::cuda::CUDAGuard device_guard(input_c.device());
-    const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+    const torch::stable::accelerator::DeviceGuard device_guard(input_c.get_device_index());
+    const auto stream = static_cast<cudaStream_t>(
+        torch::stable::accelerator::getCurrentStream(input_c.get_device_index()).nativeHandle());
     const auto border_mode = static_cast<BorderMode>(border);
 
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-        at::ScalarType::Half, at::ScalarType::BFloat16, input_c.scalar_type(), "serron_morphology", [&] {
-            scalar_t* scratch_ptr = use_separable ? scratch.data_ptr<scalar_t>() : nullptr;
-            switch (op) {
-            case MorphOp::kErode:
-                launch_morphology<scalar_t, ErodeOp>(input_c.data_ptr<scalar_t>(), kernel_c.data_ptr<scalar_t>(),
-                                                     output.data_ptr<scalar_t>(), scratch_ptr, use_separable, N, C, H,
-                                                     W, kH, kW, kernel_channel_stride, border_mode, stream);
-                break;
-            case MorphOp::kDilate:
-                launch_morphology<scalar_t, DilateOp>(input_c.data_ptr<scalar_t>(), kernel_c.data_ptr<scalar_t>(),
-                                                      output.data_ptr<scalar_t>(), scratch_ptr, use_separable, N, C, H,
-                                                      W, kH, kW, kernel_channel_stride, border_mode, stream);
-                break;
-            }
-        });
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    THO_DISPATCH_V2(input_c.scalar_type(), "serron_morphology", AT_WRAP([&] {
+                        scalar_t* scratch_ptr = use_separable ? scratch.mutable_data_ptr<scalar_t>() : nullptr;
+                        launch_morphology_for<scalar_t>(op, input_c.const_data_ptr<scalar_t>(),
+                                                        kernel_c.const_data_ptr<scalar_t>(),
+                                                        output.mutable_data_ptr<scalar_t>(), scratch_ptr, use_separable,
+                                                        N, C, H, W, kH, kW, kernel_channel_stride, border_mode, stream);
+                    }),
+                    torch::headeronly::ScalarType::Float, torch::headeronly::ScalarType::Double,
+                    torch::headeronly::ScalarType::Half, torch::headeronly::ScalarType::BFloat16);
+    SERRON_CUDA_KERNEL_LAUNCH_CHECK();
 
     return output;
 }
@@ -445,11 +465,10 @@ at::Tensor morphology_impl(const at::Tensor& input, const at::Tensor& kernel, in
  * per-channel element; same dtype as @p input.
  * @param border        Boundary mode (@ref BorderMode) applied at the image edges.
  * @return              Eroded tensor, same shape and dtype as @p input.
- * @throws c10::Error   if the tensors are not on CUDA, have the wrong rank or dtype, the channel counts disagree, or @p
- * border is out of range.
+ * @throws std::runtime_error   if the tensors are not on CUDA, have the wrong rank or dtype, the channel counts
+ * disagree, or @p border is out of range.
  */
-at::Tensor erode(const at::Tensor& input, const at::Tensor& kernel, const int64_t border,
-                 const std::optional<bool>& flat) {
+Tensor erode(const Tensor& input, const Tensor& kernel, const int64_t border, const std::optional<bool>& flat) {
     return morphology_impl(input, kernel, border, flat, MorphOp::kErode, "serron::erode");
 }
 
@@ -461,11 +480,10 @@ at::Tensor erode(const at::Tensor& input, const at::Tensor& kernel, const int64_
  * per-channel element; same dtype as @p input.
  * @param border        Boundary mode (@ref BorderMode) applied at the image edges.
  * @return              Dilated tensor, same shape and dtype as @p input.
- * @throws c10::Error   if the tensors are not on CUDA, have the wrong rank or dtype, the channel counts disagree, or @p
- * border is out of range.
+ * @throws std::runtime_error   if the tensors are not on CUDA, have the wrong rank or dtype, the channel counts
+ * disagree, or @p border is out of range.
  */
-at::Tensor dilate(const at::Tensor& input, const at::Tensor& kernel, const int64_t border,
-                  const std::optional<bool>& flat) {
+Tensor dilate(const Tensor& input, const Tensor& kernel, const int64_t border, const std::optional<bool>& flat) {
     return morphology_impl(input, kernel, border, flat, MorphOp::kDilate, "serron::dilate");
 }
 

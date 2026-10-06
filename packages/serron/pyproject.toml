@@ -55,7 +55,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "torch>=2.14,<2.15",
+    "torch>=2.13",
 ]
 
 [project.urls]
@@ -80,6 +80,8 @@ build = ["scikit-build-core==1.1.1", "cmake", "ninja"]
 minimum-version = "build-system.requires"
 cmake.version = ">=3.24"
 build-dir = "build/{wheel_tag}"
+
+wheel.py-api = "py3"
 
 wheel.packages = ["torch-ext/serron"]
 editable.rebuild = true

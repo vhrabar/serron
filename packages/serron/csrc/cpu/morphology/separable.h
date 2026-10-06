@@ -1,13 +1,18 @@
 #ifndef SERRON_CPU_MORPHOLOGY_SEPARABLE_H
 #define SERRON_CPU_MORPHOLOGY_SEPARABLE_H
 
-#include <ATen/core/Tensor.h>
+#include <compat/flatness.h>
+#include <torch/csrc/stable/tensor.h>
+#include <torch/headeronly/core/Dispatch_v2.h>
+#include <torch/headeronly/core/ScalarType.h>
 
 #include <algorithm>
 #include <cstdlib>
 #include <optional>
 
 namespace serron {
+
+using torch::stable::Tensor;
 
 /**
  * Window length at which the separable r+c path is preferred over the direct 2-D kernel, for a flat, axis-separable
@@ -28,24 +33,31 @@ inline int64_t separable_min_k() {
 }
 
 /**
- * True when @p kernel_c is a flat SE
+ * True when @p kernel_c is a flat SE.
+ *
+ * Scans the tensor's own memory, which is already host memory here.
+ *
+ * @param kernel_c  Contiguous structuring element on the CPU.
  */
-inline bool se_is_flat(const at::Tensor& kernel_c) {
-    return kernel_c.eq(0).all().item<bool>();
+inline bool se_is_flat(const Tensor& kernel_c) {
+    bool flat = false;
+    THO_DISPATCH_V2(kernel_c.scalar_type(), "serron_se_is_flat_cpu",
+                    AT_WRAP([&] { flat = all_zero(kernel_c.const_data_ptr<scalar_t>(), kernel_c.numel()); }),
+                    torch::headeronly::ScalarType::Float, torch::headeronly::ScalarType::Double,
+                    torch::headeronly::ScalarType::Half, torch::headeronly::ScalarType::BFloat16);
+    return flat;
 }
 
 /**
  * Flatness of @p kernel_c, taking the caller's answer when it has one.
  *
- * @ref se_is_flat reads a device-side reduction back to the host, which synchronises. The
- * Python layer caches flatness per structuring element and passes it down, so @p flat is
- * normally set and no synchronisation happens; @c std::nullopt keeps the direct check for
- * callers that go at the operator without it.
+ * The Python layer caches flatness per structuring element and passes it down, so @p flat is normally set and
+ * nothing is read; @c std::nullopt keeps the direct check for callers that go at the operator without it.
  *
  * @param flat      Caller's answer, or @c std::nullopt to check @p kernel_c directly.
  * @param kernel_c  Contiguous structuring element.
  */
-inline bool resolve_flat(const std::optional<bool>& flat, const at::Tensor& kernel_c) {
+inline bool resolve_flat(const std::optional<bool>& flat, const Tensor& kernel_c) {
     return flat.has_value() ? *flat : se_is_flat(kernel_c);
 }
 

@@ -6,7 +6,7 @@ dependencies = [
     "scikit-build-core==1.1.1",
     "scipy-stubs~=1.18.1.1",
     "serron",
-    "torch==2.14.1",
+    "torch>=2.13",
 ]
 
 [[tool.uv.index]]
@@ -26,7 +26,9 @@ members = ["packages/*"]
 serron = { workspace = true }
 torch = [
     { index = "pytorch-cpu", group = "cpu" },
+    { index = "pytorch-cpu", group = "cpu-newest" },
     { index = "pytorch-cu132", group = "cu132" },
+    { index = "pytorch-cu132", group = "cu132-newest" },
 ]
 
 [dependency-groups]
@@ -39,16 +41,20 @@ dev = [
     "cmake==4.4.4",
     "ninja",
 ]
-cpu = ["torch>=2.14,<2.15"]
-cu132 = ["torch>=2.14,<2.15"]
+cpu = ["torch==2.13.*"]
+cu132 = ["torch==2.13.*"]
+cpu-newest = ["torch>=2.14"]
+cu132-newest = ["torch>=2.14"]
 
 [tool.uv]
 no-build-isolation-package = ["serron"]
-default-groups = ["dev", "cu132"]
+default-groups = ["dev", "cu132-newest"]
 conflicts = [
     [
         { group = "cpu" },
         { group = "cu132" },
+        { group = "cpu-newest" },
+        { group = "cu132-newest" },
     ],
 ]
 
