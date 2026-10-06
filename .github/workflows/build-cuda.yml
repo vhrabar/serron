@@ -37,7 +37,12 @@ concurrency:
 
 jobs:
   cuda-build:
+    name: cuda-build (${{ matrix.torch }})
     runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        torch: [cu132, cu132-newest]
     env:
       CUDA_HOME: /usr/local/cuda-13.3
       CUDAToolkit_ROOT: /usr/local/cuda-13.3
@@ -86,7 +91,7 @@ jobs:
 
       # Installs project dependencies
       - name: Install build dependencies
-        run: uv sync --no-install-workspace
+        run: uv sync --no-install-workspace --no-default-groups --group dev --group ${{ matrix.torch }}
 
       # Build CUDA extension
       - name: Compile CUDA extension

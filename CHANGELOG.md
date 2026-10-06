@@ -6,6 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- A wheel no longer fails to import on a torch minor other than the one it was built against. Installing serron
+    built for torch 2.13 next to torch 2.14 raised
+    `undefined symbol: _ZN3c104cuda29c10_cuda_check_implementationEiPKcS2_jb`, because the torch C++ ABI is not
+    stable across minor releases and the metadata could only paper over it with an upper bound (#47).
+
+### Changed
+
+- The compiled extensions are built against PyTorch's stable C++ ABI (`torch/csrc/stable`, `torch/headeronly`)
+    rather than `at::` / `c10::` / `TORCH_LIBRARY`, so one wheel loads on torch 2.13 and every later release.
+    The requirement is now `torch>=2.13` with no upper bound, where it was `torch>=2.14,<2.15`. Neither library
+    has an undefined `c10::`, `at::` or `torch::` symbol any more, and `_C_cuda` no longer links `libc10_cuda`
+    or `libtorch_cuda` at all. 2.13 is the floor because `Stream::nativeHandle()`, the only way to reach a
+    `cudaStream_t` through the stable accelerator API, is gated there; the CPU library alone would compile
+    against 2.10 (#47).
+- Operator registration moved to `STABLE_TORCH_LIBRARY` / `STABLE_TORCH_LIBRARY_IMPL` with `TORCH_BOX`, which
+    `TORCH_LIBRARY_IMPL` cannot express once the operators take a `torch::stable::Tensor`. Tensor handling,
+    dtype dispatch (`THO_DISPATCH_V2`), `parallel_for`, the device guard, the stream handle and the atomics moved
+    with it; `acc_type`, the parallel grain size, the kernel launch check and the structuring-element flatness
+    scan have no stable equivalent and are now carried in `csrc/compat/` (#47).
+- Autocast is registered from Python with `torch.library.register_autocast` instead of by C++ `Autocast` /
+    `AutocastCPU` kernels, because the stable ABI has no equivalent of `at::autocast`. It casts to a dtype fixed
+    at registration where the C++ kernels derived one per call with `at::autocast::promote_type`, so float32
+    inputs now run in the lower-precision dtype — float16 on CUDA, bfloat16 on CPU — where before they stayed in
+    float32, and the dtype is the registered one rather than the one the enclosing `torch.autocast` asks for.
+    float64 is still left alone, and nothing changes outside `torch.autocast` (#47).
+- One wheel per platform replaces one per CPython version: the compiled libraries use no CPython API, so the
+    wheels are tagged `py3-none-<platform>` and the release builds a single interpreter per OS and architecture
+    (#47).
+- Building the CUDA backend from source no longer needs a CUDA-enabled torch, only nvcc and the CUDA toolkit:
+    `_C_cuda` reaches torch through the stable shim, whose entry points all live in `libtorch_cpu` (#47).
+
 ## [0.4.0] - 2026-10-01
 
 ### Added

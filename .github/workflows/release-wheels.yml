@@ -12,6 +12,9 @@ env:
   PACKAGE: serron
   PKG_DIR: packages/serron
   CUDA_MAJOR_MINOR: "13-2"
+  # The wheels are py3-none, so one interpreter builds for all of them. 3.12 is requires-python's floor.
+  BUILD_PYTHON_TAG: cp312-cp312
+  BUILD_PYTHON: "3.12"
   TORCH_INDEX: https://download.pytorch.org/whl/cu132
   PIP_RETRIES: "5"
   PIP_TIMEOUT: "60"
@@ -73,7 +76,6 @@ jobs:
       fail-fast: false
       matrix:
         arch: [x86_64, aarch64]
-        python: [cp312-cp312, cp313-cp313, cp314-cp314]
         include:
           - arch: x86_64
             runner: ubuntu-latest
@@ -100,7 +102,7 @@ jobs:
           CUDA_HOME: /usr/local/cuda-13.2
           CMAKE_BUILD_PARALLEL_LEVEL: "2"
         run: |
-          export PATH="/usr/local/cuda-13.2/bin:/opt/python/${{ matrix.python }}/bin:${PATH}"
+          export PATH="/usr/local/cuda-13.2/bin:/opt/python/${{ env.BUILD_PYTHON_TAG }}/bin:${PATH}"
           python -m pip install --upgrade pip
           # CUDA-enabled torch used only to compile against (no build isolation). The spec comes from
           # ${PKG_DIR}/pyproject.toml [project].dependencies, so the wheel is built against the torch minor it declares.
@@ -114,7 +116,7 @@ jobs:
 
       - name: Repair wheel (retag manylinux, do not vendor torch/cuda)
         run: |
-          export PATH="/opt/python/${{ matrix.python }}/bin:${PATH}"
+          export PATH="/opt/python/${{ env.BUILD_PYTHON_TAG }}/bin:${PATH}"
           auditwheel repair dist_raw/*.whl --wheel-dir dist \
             --exclude 'libtorch*.so*' \
             --exclude 'libc10*.so*' \
@@ -125,11 +127,13 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: wheels-linux-${{ matrix.arch }}-${{ matrix.python }}
+          name: wheels-linux-${{ matrix.arch }}
           path: dist/*.whl
 
-  # Install each built Linux wheel next to a CPU-only torch and run an op forward and backward. This is the
-  # setup where a CUDA-linked _C used to fail at import (libc10_cuda.so missing).
+  # Install the one Linux wheel next to a CPU-only torch and run an op forward and backward. Two axes: every
+  # supported interpreter, which is what proves a single py3-none wheel loads on all of them, and both ends of
+  # the declared torch range, which is what proves the stable ABI holds. This is also the setup where a
+  # CUDA-linked _C used to fail at import (libc10_cuda.so missing).
   smoke-test-cpu:
     needs: [linux-wheels]
     runs-on: ubuntu-latest
@@ -137,6 +141,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ["3.12", "3.13", "3.14"]
+        torch: [floor, newest]
     steps:
       - uses: actions/checkout@v7
 
@@ -146,13 +151,17 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
-          pattern: wheels-linux-x86_64-*
+          name: wheels-linux-x86_64
           path: dist
-          merge-multiple: true
 
       - name: Install wheel with CPU-only torch
+        env:
+          TORCH_AXIS: ${{ matrix.torch }}
         run: |
-          torch_req="$(python -c 'import pathlib, tomllib; print(next(d for d in tomllib.loads(pathlib.Path("'"${PKG_DIR}"'/pyproject.toml").read_text())["project"]["dependencies"] if d.startswith("torch")))')"
+          # The spec comes from ${PKG_DIR}/pyproject.toml, so the floor is not duplicated here: "newest" takes the
+          # declared range as-is, "floor" pins its lower bound exactly.
+          torch_req="$(python "${GITHUB_WORKSPACE}/scripts/torch_req.py")"
+          echo "installing ${torch_req}"
           python -m pip install --index-url https://download.pytorch.org/whl/cpu "${torch_req}"
           python -m pip install --no-index --find-links dist "${PACKAGE}"
 
@@ -177,16 +186,12 @@ jobs:
   windows-wheel:
     needs: [verify]
     runs-on: windows-2025
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ["3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v7
         with:
-          python-version: ${{ matrix.python }}
+          python-version: ${{ env.BUILD_PYTHON }}
 
       - name: Install CUDA toolkit
         uses: Jimver/cuda-toolkit@v0.2.36
@@ -211,7 +216,7 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: wheels-windows-x86_64-${{ matrix.python }}
+          name: wheels-windows-x86_64
           path: dist/*.whl
 
   # Attach every artifact to the GitHub Release

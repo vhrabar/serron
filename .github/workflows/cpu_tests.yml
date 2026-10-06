@@ -15,12 +15,13 @@ concurrency:
 
 jobs:
   pytest:
-    name: pytest (py${{ matrix.python }})
+    name: pytest (py${{ matrix.python }}, ${{ matrix.torch }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         python: ["3.12", "3.13", "3.14"]
+        torch: [cpu, cpu-newest]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -35,8 +36,7 @@ jobs:
 
       # CPU-only build
       - name: Sync (CPU torch + build + dev tools)
-        run: uv sync --no-group cu132 --group cpu
+        run: uv sync --no-default-groups --group dev --group ${{ matrix.torch }}
 
-      # CUDA-only tests
       - name: Run tests
         run: uv run --no-sync pytest tests/

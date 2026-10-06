@@ -4,16 +4,19 @@ Mathematical Morphology module for PyTorch (CUDA), providing differentiable oper
 
 ## Install
 
-Prebuilt wheels are published for CPython 3.12–3.14 on Linux (x86_64, aarch64) and
-Windows (x86_64).
+One prebuilt wheel per platform covers every supported interpreter, on Linux (x86_64,
+aarch64) and Windows (x86_64).
 
 ```bash
 pip install serron
 ```
 
-The wheels are built against torch 2.14 and require it (`torch>=2.14,<2.15`): the torch C++
-ABI changes between minor releases. They load on both CUDA and CPU-only torch builds; the
-CUDA kernels are only loaded when the installed torch has CUDA.
+The kernels are built against PyTorch's stable C++ ABI, so a wheel loads on torch 2.13 and
+every later release (`torch>=2.13`) rather than only the minor it was compiled against. The
+wheel carries no CPython tag either, because the compiled libraries use no CPython API.
+
+Wheels load on both CUDA and CPU-only torch builds; the CUDA kernels are only loaded when
+the installed torch has CUDA. The CUDA build requires a torch built against CUDA 13.
 
 ## Usage
 

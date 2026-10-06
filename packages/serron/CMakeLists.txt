@@ -24,26 +24,14 @@ set(Python_FIND_VIRTUALENV FIRST)
 # shared objects that torch.ops.load_library dlopens; nothing needs the CPython headers or ABI.
 find_package(Python REQUIRED COMPONENTS Interpreter)
 
-execute_process(
-        COMMAND ${Python_EXECUTABLE} -c "import torch; print(torch.version.cuda or '')"
-        OUTPUT_VARIABLE SERRON_TORCH_CUDA
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-
 include(CheckLanguage)
 check_language(CUDA)
-if(CMAKE_CUDA_COMPILER AND SERRON_TORCH_CUDA)
+if(CMAKE_CUDA_COMPILER)
     set(_serron_cuda_default ON)
 else()
     set(_serron_cuda_default OFF)
 endif()
-option(SERRON_CUDA "Build the CUDA backend (requires nvcc and a CUDA-enabled torch)" ${_serron_cuda_default})
-
-# SERRON_CUDA stays cached in the build dir, so it can be ON from an earlier CUDA torch after switching to a CPU one.
-if(SERRON_CUDA AND NOT SERRON_TORCH_CUDA)
-    message(WARNING "SERRON_CUDA is ON, but the installed torch has no CUDA support; building C++ only.")
-    set(SERRON_CUDA OFF)
-endif()
+option(SERRON_CUDA "Build the CUDA backend (requires nvcc)" ${_serron_cuda_default})
 
 if(SERRON_CUDA)
     enable_language(CUDA)
