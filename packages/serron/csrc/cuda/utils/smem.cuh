@@ -3,8 +3,8 @@
 
 #include <cuda_runtime.h>
 
+#include <compat/check.h>
 #include <torch/csrc/stable/accelerator.h>
-#include <torch/headeronly/util/Exception.h>
 
 #include <cstddef>
 
@@ -21,12 +21,12 @@ inline size_t smem_budget() {
     const auto device = torch::stable::accelerator::getCurrentDeviceIndex();
     static constexpr int kMaxDevices = 64;
     static size_t cached[kMaxDevices] = {};
-    STD_TORCH_CHECK(device >= 0 && device < kMaxDevices, "serron: device index ", device, " out of range");
+    SERRON_CHECK(device >= 0 && device < kMaxDevices, "serron: device index ", device, " out of range");
     if (cached[device] == 0) {
         int optin = 0;
         const cudaError_t status = cudaDeviceGetAttribute(&optin, cudaDevAttrMaxSharedMemoryPerBlockOptin, device);
-        STD_TORCH_CHECK(status == cudaSuccess,
-                        "serron: shared-memory attribute query failed: ", cudaGetErrorString(status));
+        SERRON_CHECK(status == cudaSuccess,
+                     "serron: shared-memory attribute query failed: ", cudaGetErrorString(status));
         cached[device] = static_cast<size_t>(optin);
     }
     return cached[device];

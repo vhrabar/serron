@@ -5,12 +5,12 @@
 
 #include <cuda_runtime.h>
 
+#include <compat/check.h>
 #include <compat/flatness.h>
 #include <torch/csrc/stable/accelerator.h>
 #include <torch/csrc/stable/tensor.h>
 #include <torch/headeronly/core/Dispatch_v2.h>
 #include <torch/headeronly/core/ScalarType.h>
-#include <torch/headeronly/util/Exception.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -64,7 +64,7 @@ inline int64_t line_chunks_per_block(const int64_t k, const int64_t line_len, co
 
 /// Throws when @p status reports a failure, naming @p what.
 inline void check_cuda(const cudaError_t status, const char* what) {
-    STD_TORCH_CHECK(status == cudaSuccess, "serron: ", what, " failed: ", cudaGetErrorString(status));
+    SERRON_CHECK(status == cudaSuccess, "serron: ", what, " failed: ", cudaGetErrorString(status));
 }
 
 /**

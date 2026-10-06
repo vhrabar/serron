@@ -11,13 +11,13 @@
 #include <cuda_runtime.h>
 
 #include <compat/acc_type.h>
+#include <compat/check.h>
 #include <compat/cuda_launch_check.cuh>
 #include <torch/csrc/stable/accelerator.h>
 #include <torch/csrc/stable/ops.h>
 #include <torch/headeronly/core/Dispatch_v2.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/cuda/Atomic.h>
-#include <torch/headeronly/util/Exception.h>
 
 #include <cstdint>
 #include <tuple>
@@ -558,18 +558,16 @@ std::tuple<Tensor, Tensor> morphology_backward_impl(const Tensor& grad_output, c
                                                     const Tensor& kernel, int64_t border,
                                                     const std::optional<bool>& flat, bool need_kernel_grad, MorphOp op,
                                                     const char* name) {
-    STD_TORCH_CHECK(grad_output.is_cuda(), name, ": grad_output must be a CUDA tensor");
-    STD_TORCH_CHECK(input.is_cuda(), name, ": input must be a CUDA tensor");
-    STD_TORCH_CHECK(kernel.is_cuda(), name, ": kernel must be a CUDA tensor");
-    STD_TORCH_CHECK(input.dim() == 4, name, ": input must be 4-D (N, C, H, W), got ", input.dim(), "-D");
-    STD_TORCH_CHECK(grad_output.dim() == 4, name, ": grad_output must be 4-D (N, C, H, W), got ", grad_output.dim(),
-                    "-D");
-    STD_TORCH_CHECK(kernel.dim() == 2 || kernel.dim() == 3, name,
-                    ": kernel must be 2-D (kH, kW) or 3-D (C, kH, kW), got ", kernel.dim(), "-D");
-    STD_TORCH_CHECK(input.scalar_type() == kernel.scalar_type(), name, ": input and kernel must share a dtype");
-    STD_TORCH_CHECK(grad_output.scalar_type() == input.scalar_type(), name,
-                    ": grad_output and input must share a dtype");
-    STD_TORCH_CHECK(border >= kReflect && border <= kConstant, name, ": invalid border mode ", border);
+    SERRON_CHECK(grad_output.is_cuda(), name, ": grad_output must be a CUDA tensor");
+    SERRON_CHECK(input.is_cuda(), name, ": input must be a CUDA tensor");
+    SERRON_CHECK(kernel.is_cuda(), name, ": kernel must be a CUDA tensor");
+    SERRON_CHECK(input.dim() == 4, name, ": input must be 4-D (N, C, H, W), got ", input.dim(), "-D");
+    SERRON_CHECK(grad_output.dim() == 4, name, ": grad_output must be 4-D (N, C, H, W), got ", grad_output.dim(), "-D");
+    SERRON_CHECK(kernel.dim() == 2 || kernel.dim() == 3, name, ": kernel must be 2-D (kH, kW) or 3-D (C, kH, kW), got ",
+                 kernel.dim(), "-D");
+    SERRON_CHECK(input.scalar_type() == kernel.scalar_type(), name, ": input and kernel must share a dtype");
+    SERRON_CHECK(grad_output.scalar_type() == input.scalar_type(), name, ": grad_output and input must share a dtype");
+    SERRON_CHECK(border >= kReflect && border <= kConstant, name, ": invalid border mode ", border);
 
     const Tensor grad_output_c = torch::stable::contiguous(grad_output);
     const Tensor input_c = torch::stable::contiguous(input);
@@ -584,8 +582,8 @@ std::tuple<Tensor, Tensor> morphology_backward_impl(const Tensor& grad_output, c
     int64_t kW = 0;
     int64_t kernel_channel_stride = 0;
     if (kernel_c.dim() == 3) {
-        STD_TORCH_CHECK(kernel_c.size(0) == C, name, ": kernel channel dim (", kernel_c.size(0),
-                        ") must match input channels (", C, ")");
+        SERRON_CHECK(kernel_c.size(0) == C, name, ": kernel channel dim (", kernel_c.size(0),
+                     ") must match input channels (", C, ")");
         kH = kernel_c.size(1);
         kW = kernel_c.size(2);
         kernel_channel_stride = kH * kW;
@@ -594,8 +592,8 @@ std::tuple<Tensor, Tensor> morphology_backward_impl(const Tensor& grad_output, c
         kW = kernel_c.size(1);
         kernel_channel_stride = 0;
     }
-    STD_TORCH_CHECK(kH > 0 && kW > 0, name, ": kernel spatial dims must be positive");
-    STD_TORCH_CHECK(grad_output_c.sizes() == input_c.sizes(), name, ": grad_output shape must match input");
+    SERRON_CHECK(kH > 0 && kW > 0, name, ": kernel spatial dims must be positive");
+    SERRON_CHECK(grad_output_c.sizes() == input_c.sizes(), name, ": grad_output shape must match input");
 
     Tensor grad_input = torch::stable::new_zeros(input_c, input_c.sizes());
     Tensor grad_kernel = torch::stable::new_zeros(kernel_c, kernel_c.sizes());

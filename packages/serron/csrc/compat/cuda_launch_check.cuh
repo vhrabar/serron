@@ -3,7 +3,7 @@
 
 #include <cuda_runtime.h>
 
-#include <torch/headeronly/util/Exception.h>
+#include <compat/check.h>
 
 /**
  * Throws if the most recent kernel launch failed.
@@ -15,8 +15,8 @@
 #define SERRON_CUDA_KERNEL_LAUNCH_CHECK()                                                                              \
     do {                                                                                                               \
         const cudaError_t serron_launch_status_ = cudaGetLastError();                                                  \
-        STD_TORCH_CHECK(serron_launch_status_ == cudaSuccess,                                                          \
-                        "CUDA kernel launch failed: ", cudaGetErrorString(serron_launch_status_));                     \
+        SERRON_CHECK(serron_launch_status_ == cudaSuccess,                                                             \
+                     "CUDA kernel launch failed: ", cudaGetErrorString(serron_launch_status_));                        \
     } while (0)
 
 #endif // SERRON_COMPAT_CUDA_LAUNCH_CHECK_CUH

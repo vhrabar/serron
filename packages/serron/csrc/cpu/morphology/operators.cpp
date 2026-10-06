@@ -6,11 +6,11 @@
 #include <cpu/utils/boundaries.h>
 
 #include <compat/acc_type.h>
+#include <compat/check.h>
 #include <compat/grain_size.h>
 #include <torch/csrc/stable/ops.h>
 #include <torch/headeronly/core/Dispatch_v2.h>
 #include <torch/headeronly/core/ScalarType.h>
-#include <torch/headeronly/util/Exception.h>
 
 #include <algorithm>
 #include <cmath>
@@ -221,13 +221,13 @@ void morphology_cpu_for(const MorphOp op, const scalar_t* input, const scalar_t*
  */
 Tensor morphology_impl(const Tensor& input, const Tensor& kernel, int64_t border, const std::optional<bool>& flat,
                        MorphOp op, const char* name) {
-    STD_TORCH_CHECK(input.is_cpu(), name, ": input must be a CPU tensor");
-    STD_TORCH_CHECK(kernel.is_cpu(), name, ": kernel must be a CPU tensor");
-    STD_TORCH_CHECK(input.dim() == 4, name, ": input must be 4-D (N, C, H, W), got ", input.dim(), "-D");
-    STD_TORCH_CHECK(kernel.dim() == 2 || kernel.dim() == 3, name,
-                    ": kernel must be 2-D (kH, kW) or 3-D (C, kH, kW), got ", kernel.dim(), "-D");
-    STD_TORCH_CHECK(input.scalar_type() == kernel.scalar_type(), name, ": input and kernel must share a dtype");
-    STD_TORCH_CHECK(border >= kReflect && border <= kConstant, name, ": invalid border mode ", border);
+    SERRON_CHECK(input.is_cpu(), name, ": input must be a CPU tensor");
+    SERRON_CHECK(kernel.is_cpu(), name, ": kernel must be a CPU tensor");
+    SERRON_CHECK(input.dim() == 4, name, ": input must be 4-D (N, C, H, W), got ", input.dim(), "-D");
+    SERRON_CHECK(kernel.dim() == 2 || kernel.dim() == 3, name, ": kernel must be 2-D (kH, kW) or 3-D (C, kH, kW), got ",
+                 kernel.dim(), "-D");
+    SERRON_CHECK(input.scalar_type() == kernel.scalar_type(), name, ": input and kernel must share a dtype");
+    SERRON_CHECK(border >= kReflect && border <= kConstant, name, ": invalid border mode ", border);
 
     const Tensor input_c = torch::stable::contiguous(input);
     const Tensor kernel_c = torch::stable::contiguous(kernel);
@@ -241,8 +241,8 @@ Tensor morphology_impl(const Tensor& input, const Tensor& kernel, int64_t border
     int64_t kW = 0;
     int64_t kernel_channel_stride = 0;
     if (kernel_c.dim() == 3) {
-        STD_TORCH_CHECK(kernel_c.size(0) == C, name, ": kernel channel dim (", kernel_c.size(0),
-                        ") must match input channels (", C, ")");
+        SERRON_CHECK(kernel_c.size(0) == C, name, ": kernel channel dim (", kernel_c.size(0),
+                     ") must match input channels (", C, ")");
         kH = kernel_c.size(1);
         kW = kernel_c.size(2);
         kernel_channel_stride = kH * kW;
@@ -251,7 +251,7 @@ Tensor morphology_impl(const Tensor& input, const Tensor& kernel, int64_t border
         kW = kernel_c.size(1);
         kernel_channel_stride = 0;
     }
-    STD_TORCH_CHECK(kH > 0 && kW > 0, name, ": kernel spatial dims must be positive");
+    SERRON_CHECK(kH > 0 && kW > 0, name, ": kernel spatial dims must be positive");
 
     Tensor output = torch::stable::empty_like(input_c);
     if (output.numel() == 0)
