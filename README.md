@@ -200,13 +200,18 @@ cd serron
 
 ### Choosing a torch build
 
-`torch` is pulled from a specific wheel index via mutually-exclusive dependency groups.
-`cu132` is enabled by default, so plain `uv sync` gives the CUDA 13.2 build; swap it for
-`cpu` on a machine without a GPU:
+`torch` is pulled from a specific wheel index via mutually-exclusive dependency groups,
+one per backend and end of the supported range: `cu132` / `cpu` at the oldest torch the
+kernels target, `cu132-newest` / `cpu-newest` at the current release. `cu132-newest` is
+enabled by default, so plain `uv sync` gives the CUDA 13.2 build against the newest torch.
+Because the groups conflict, selecting another one means turning the default off, which
+`--no-default-groups` does in one step:
 
 ```bash
-uv sync                              # CUDA 13.2 build
-uv sync --no-group cu132 --group cpu # CPU-only build
+uv sync                                                   # CUDA, newest torch
+uv sync --no-default-groups --group dev --group cpu-newest # CPU-only, newest torch
+uv sync --no-default-groups --group dev --group cu132      # CUDA, oldest supported torch
+uv sync --no-default-groups --group dev --group cpu        # CPU-only, oldest supported torch
 ```
 
 ### Building the wheel
@@ -222,7 +227,7 @@ On a GPU-less machine, sync the CPU torch build instead; the extension then buil
 C++ only (no `nvcc` required):
 
 ```bash
-uv sync --no-install-workspace --no-group cu132 --group cpu
+uv sync --no-install-workspace --no-default-groups --group dev --group cpu-newest
 uv build --package serron --wheel --no-build-isolation
 ```
 

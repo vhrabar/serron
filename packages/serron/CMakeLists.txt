@@ -152,6 +152,7 @@ if(SERRON_CUDA)
     set(_serron_cuda_headers
             csrc/cuda/utils/boundaries.cuh
             csrc/cuda/utils/declarations.cuh
+            csrc/compat/atomic.cuh
             csrc/compat/cuda_launch_check.cuh
             csrc/cuda/utils/smem.cuh
             csrc/cuda/morphology/enums.cuh
