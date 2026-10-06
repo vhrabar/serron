@@ -117,7 +117,7 @@ endif()
 # _C holds the op schemas and the CPU kernels and links only torch_cpu/c10, so it loads on CPU-only torch.
 # _C_cuda holds the CUDA kernels and is loaded on top of it only when torch has CUDA.
 add_library(_C SHARED
-        csrc/bindings.cpp
+        torch-ext/torch_binding.cpp
         csrc/cpu/morphology/operators.cpp
         csrc/cpu/morphology/backward.cpp
 )
@@ -135,6 +135,7 @@ endif()
 # Headers are listed only so IDEs index them; they are not compiled on their own.
 set(_serron_headers
         csrc/ops.h
+        torch-ext/torch_binding.h
         csrc/compat/acc_type.h
         csrc/compat/check.h
         csrc/compat/flatness.h

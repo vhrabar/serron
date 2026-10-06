@@ -57,6 +57,13 @@ cmake-build-*/
 # .run/ holds shared run configurations and is tracked; .idea/ is per-developer workspace state.
 
 # -------------------------
+# kernel-builder generated
+# -------------------------
+
+packages/serron/torch-ext/registration.h
+packages/serron/torch-ext/serron/_ops.py
+
+# -------------------------
 # GitHub Actions artifacts
 # -------------------------
 
