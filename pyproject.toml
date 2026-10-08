@@ -6,7 +6,7 @@ dependencies = [
     "scikit-build-core==1.1.1",
     "scipy-stubs~=1.18.1.1",
     "serron",
-    "torch>=2.13",
+    "torch>=2.14.1",
 ]
 
 [[tool.uv.index]]
@@ -41,10 +41,10 @@ dev = [
     "cmake==4.4.4",
     "ninja",
 ]
-cpu = ["torch==2.13.*"]
-cu132 = ["torch==2.13.*"]
-cpu-newest = ["torch>=2.14"]
-cu132-newest = ["torch>=2.14"]
+cpu = ["torch==2.14.*"]
+cu132 = ["torch==2.14.*"]
+cpu-newest = ["torch>=2.14.1"]
+cu132-newest = ["torch>=2.14.1"]
 
 [tool.uv]
 no-build-isolation-package = ["serron"]
