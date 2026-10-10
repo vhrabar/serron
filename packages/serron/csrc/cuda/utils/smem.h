@@ -1,5 +1,5 @@
-#ifndef SERRON_SMEM_CUH
-#define SERRON_SMEM_CUH
+#ifndef SERRON_CUDA_SMEM_H
+#define SERRON_CUDA_SMEM_H
 
 #include <cuda_runtime.h>
 
@@ -59,4 +59,4 @@ bool configure_kernel_smem(KernelFn kernel, const size_t bytes) {
 
 } // namespace serron
 
-#endif // SERRON_SMEM_CUH
+#endif // SERRON_CUDA_SMEM_H

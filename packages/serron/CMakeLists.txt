@@ -126,8 +126,10 @@ set(_serron_targets _C)
 if(SERRON_CUDA)
     add_library(_C_cuda SHARED
             csrc/cuda/bindings.cpp
-            csrc/cuda/morphology/operators.cu
-            csrc/cuda/morphology/backward.cu
+            csrc/cuda/morphology/operators.cpp
+            csrc/cuda/morphology/backward.cpp
+            csrc/cuda/morphology/forward_kernels.cu
+            csrc/cuda/morphology/backward_kernels.cu
     )
     list(APPEND _serron_targets _C_cuda)
 endif()
@@ -150,15 +152,17 @@ target_sources(_C PRIVATE ${_serron_headers})
 
 if(SERRON_CUDA)
     set(_serron_cuda_headers
+            csrc/cuda/utils/border_mode.h
             csrc/cuda/utils/boundaries.cuh
-            csrc/cuda/utils/declarations.cuh
-            csrc/compat/cuda_launch_check.cuh
-            csrc/cuda/utils/smem.cuh
-            csrc/cuda/morphology/entry_points.cuh
-            csrc/cuda/morphology/enums.cuh
+            csrc/cuda/utils/declarations.h
+            csrc/cuda/utils/launch.h
+            csrc/cuda/utils/smem.h
+            csrc/cuda/morphology/arg_tap.h
+            csrc/cuda/morphology/entry_points.h
+            csrc/cuda/morphology/enums.h
             csrc/cuda/morphology/ops_policy.cuh
             csrc/cuda/morphology/scan.cuh
-            csrc/cuda/morphology/separable.cuh
+            csrc/cuda/morphology/separable.h
     )
     set_source_files_properties(${_serron_cuda_headers} PROPERTIES HEADER_FILE_ONLY TRUE)
     target_sources(_C_cuda PRIVATE ${_serron_cuda_headers})

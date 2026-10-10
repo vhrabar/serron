@@ -1,7 +1,7 @@
-#ifndef SERRON_MORPHOLOGY_SEPARABLE_CUH
-#define SERRON_MORPHOLOGY_SEPARABLE_CUH
+#ifndef SERRON_CUDA_MORPHOLOGY_SEPARABLE_H
+#define SERRON_CUDA_MORPHOLOGY_SEPARABLE_H
 
-#include <cuda/utils/declarations.cuh>
+#include <cuda/utils/declarations.h>
 
 #include <cuda_runtime.h>
 
@@ -117,4 +117,4 @@ inline bool use_separable_path(const bool is_flat, const int64_t kH, const int64
 
 } // namespace serron
 
-#endif // SERRON_MORPHOLOGY_SEPARABLE_CUH
+#endif // SERRON_CUDA_MORPHOLOGY_SEPARABLE_H

@@ -1,5 +1,5 @@
-#ifndef SERRON_DECLARATIONS_CUH
-#define SERRON_DECLARATIONS_CUH
+#ifndef SERRON_CUDA_DECLARATIONS_H
+#define SERRON_CUDA_DECLARATIONS_H
 
 /// Threads per block for the element-wise morphology launches.
 constexpr int THREADS = 256;
@@ -17,4 +17,4 @@ constexpr int WARP_SIZE = 32;
 /// Warps per separable line block
 constexpr int LINE_WARPS = LINE_TILE / WARP_SIZE;
 
-#endif // SERRON_DECLARATIONS_CUH
+#endif // SERRON_CUDA_DECLARATIONS_H
