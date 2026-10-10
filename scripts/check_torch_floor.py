@@ -15,7 +15,7 @@ PKG_PYPROJECT = ROOT / "packages/serron/pyproject.toml"
 ROOT_PYPROJECT = ROOT / "pyproject.toml"
 CMAKELISTS = ROOT / "packages/serron/CMakeLists.txt"
 
-FLOOR_GROUPS = ("cpu", "cu132")
+FLOOR_GROUPS = ("cpu", "cu129", "cu132")
 
 
 def torch_spec(deps: list[str]) -> str:

@@ -18,7 +18,7 @@ on:
       - 'pyproject.toml'
       - 'uv.lock'
   pull_request:
-    branches: [main]
+    branches: [dev, main]
     paths:
       - 'csrc/**'
       - '**/*.cu'
@@ -37,20 +37,23 @@ concurrency:
 
 jobs:
   cuda-build:
-    name: cuda-build (${{ matrix.torch }})
+    name: cuda-build (CUDA ${{ matrix.cuda }}, ${{ matrix.torch }})
     runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
         torch: [cu132, cu132-newest]
-    env:
-      CUDA_HOME: /usr/local/cuda-13.3
-      CUDAToolkit_ROOT: /usr/local/cuda-13.3
+        cuda: ["12.9.1", "13.3.1"]
+        include:
+          - cuda: "12.9.1"
+            gcc: "14"
+          - cuda: "13.3.1"
+            gcc: "15"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      # free disk space
+      # free disk space; the toolkit runfile and its extraction need several GB
       - name: Free disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
@@ -58,28 +61,35 @@ jobs:
           sudo apt-get clean
           df -h
 
-      # cache
-      - name: Cache CUDA toolkit
-        id: cache-cuda
-        uses: actions/cache@v6
-        with:
-          path: /usr/local/cuda-13.3
-          key: cuda-13.3-${{ runner.os }}-v1
-
-      # Install CUDA compiler
-      - name: Install CUDA compiler
-        if: steps.cache-cuda.outputs.cache-hit != 'true'
+      - name: Install host compiler
         run: |
-          wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2604/x86_64/cuda-keyring_1.1-1_all.deb
-          sudo dpkg -i cuda-keyring_1.1-1_all.deb
           sudo apt-get update -q
-          sudo apt-get install -y cuda-compiler-13-3 cuda-libraries-dev-13-3
+          sudo apt-get install -y gcc-${{ matrix.gcc }} g++-${{ matrix.gcc }}
+          {
+            echo "CC=gcc-${{ matrix.gcc }}"
+            echo "CXX=g++-${{ matrix.gcc }}"
+            echo "CUDAHOSTCXX=g++-${{ matrix.gcc }}"
+          } >> "$GITHUB_ENV"
 
-      - name: Add CUDA to PATH
-        run: echo "/usr/local/cuda-13.3/bin" >> "$GITHUB_PATH"
+      - name: Install CUDA toolkit
+        id: cuda-toolkit
+        uses: Jimver/cuda-toolkit@v0.2.36
+        with:
+          cuda: ${{ matrix.cuda }}
+          method: local
+          linux-local-args: '["--toolkit"]'
+          use-github-cache: false
+          log-file-suffix: "${{ matrix.cuda }}-${{ matrix.torch }}.txt"
 
-      - name: Verify nvcc
-        run: nvcc --version
+      - name: Point the build at the toolkit
+        run: |
+          echo "CUDA_HOME=${{ steps.cuda-toolkit.outputs.CUDA_PATH }}" >> "$GITHUB_ENV"
+          echo "CUDAToolkit_ROOT=${{ steps.cuda-toolkit.outputs.CUDA_PATH }}" >> "$GITHUB_ENV"
+
+      - name: Verify toolchain
+        run: |
+          nvcc --version
+          "$CXX" --version
 
       # uv package manager
       - name: Install uv

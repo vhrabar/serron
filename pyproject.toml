@@ -15,6 +15,11 @@ url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
 [[tool.uv.index]]
+name = "pytorch-cu129"
+url = "https://download.pytorch.org/whl/cu129"
+explicit = true
+
+[[tool.uv.index]]
 name = "pytorch-cu132"
 url = "https://download.pytorch.org/whl/cu132"
 explicit = true
@@ -27,6 +32,7 @@ serron = { workspace = true }
 torch = [
     { index = "pytorch-cpu", group = "cpu" },
     { index = "pytorch-cpu", group = "cpu-newest" },
+    { index = "pytorch-cu129", group = "cu129" },
     { index = "pytorch-cu132", group = "cu132" },
     { index = "pytorch-cu132", group = "cu132-newest" },
 ]
@@ -42,6 +48,7 @@ dev = [
     "ninja",
 ]
 cpu = ["torch==2.13.*"]
+cu129 = ["torch==2.13.*"]
 cu132 = ["torch==2.13.*"]
 cpu-newest = ["torch>=2.14"]
 cu132-newest = ["torch>=2.14"]
@@ -52,6 +59,7 @@ default-groups = ["dev", "cu132-newest"]
 conflicts = [
     [
         { group = "cpu" },
+        { group = "cu129" },
         { group = "cu132" },
         { group = "cpu-newest" },
         { group = "cu132-newest" },

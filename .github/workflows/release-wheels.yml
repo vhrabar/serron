@@ -11,8 +11,7 @@ permissions:
 env:
   PACKAGE: serron
   PKG_DIR: packages/serron
-  CUDA_MAJOR_MINOR: "13-2"
-  # The wheels are py3-none, so one interpreter builds for all of them. 3.12 is requires-python's floor.
+  CUDA_VERSION: "13.2.0"
   BUILD_PYTHON_TAG: cp312-cp312
   BUILD_PYTHON: "3.12"
   TORCH_INDEX: https://download.pytorch.org/whl/cu132
@@ -80,29 +79,40 @@ jobs:
           - arch: x86_64
             runner: ubuntu-latest
             container: quay.io/pypa/manylinux_2_28_x86_64
-            cuda_repo: rhel8/x86_64
           - arch: aarch64
             runner: ubuntu-24.04-arm
             container: quay.io/pypa/manylinux_2_28_aarch64
-            cuda_repo: rhel8/sbsa
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.container }}
+    env:
+      CC: /opt/rh/gcc-toolset-14/root/usr/bin/gcc
+      CXX: /opt/rh/gcc-toolset-14/root/usr/bin/g++
+      CUDAHOSTCXX: /opt/rh/gcc-toolset-14/root/usr/bin/g++
     steps:
       - uses: actions/checkout@v7
 
+      # The toolkit action runs its installer through sudo, which the manylinux image does not ship.
+      - name: Install sudo and host compiler
+        run: dnf -y install sudo gcc-toolset-14-gcc gcc-toolset-14-gcc-c++
+
       - name: Install CUDA toolkit
-        run: |
-          dnf -y install dnf-plugins-core
-          dnf config-manager --add-repo \
-            "https://developer.download.nvidia.com/compute/cuda/repos/${{ matrix.cuda_repo }}/cuda-rhel8.repo"
-          dnf -y install "cuda-compiler-${CUDA_MAJOR_MINOR}" "cuda-libraries-devel-${CUDA_MAJOR_MINOR}"
+        id: cuda-toolkit
+        uses: Jimver/cuda-toolkit@v0.2.36
+        with:
+          cuda: ${{ env.CUDA_VERSION }}
+          method: local
+          linux-local-args: '["--toolkit"]'
+          use-github-cache: false
+          log-file-suffix: "${{ matrix.arch }}.txt"
 
       - name: Build wheel
         env:
-          CUDA_HOME: /usr/local/cuda-13.2
+          CUDA_HOME: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}
           CMAKE_BUILD_PARALLEL_LEVEL: "2"
         run: |
-          export PATH="/usr/local/cuda-13.2/bin:/opt/python/${{ env.BUILD_PYTHON_TAG }}/bin:${PATH}"
+          export PATH="/opt/python/${{ env.BUILD_PYTHON_TAG }}/bin:${PATH}"
+          nvcc --version
+          "$CXX" --version
           python -m pip install --upgrade pip
           # CUDA-enabled torch used only to compile against (no build isolation). The spec comes from
           # ${PKG_DIR}/pyproject.toml [project].dependencies, so the wheel is built against the torch minor it declares.
@@ -194,14 +204,16 @@ jobs:
           python-version: ${{ env.BUILD_PYTHON }}
 
       - name: Install CUDA toolkit
+        id: cuda-toolkit
         uses: Jimver/cuda-toolkit@v0.2.36
         with:
-          cuda: "13.2.0"
+          cuda: ${{ env.CUDA_VERSION }}
           method: local
+          use-github-cache: false
 
       - name: Verify CUDA CRT headers
         shell: cmd
-        run: dir "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2\include\crt"
+        run: dir "%CUDA_PATH%\include\crt"
 
       - name: Build wheel
         env:

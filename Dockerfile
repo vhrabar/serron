@@ -8,11 +8,13 @@
 #
 
 
-ARG CUDA_VERSION=13.3.0
+ARG CUDA_VERSION=12.9.1
+ARG UBUNTU_VERSION=24.04
 
-FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu26.04
+FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}
 
 ARG CUDA_ARCH=""
+ARG TORCH_GROUP=cu129
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential ninja-build \
@@ -37,12 +39,12 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 COPY packages/serron/pyproject.toml packages/serron/pyproject.toml
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-workspace
+    uv sync --frozen --no-install-workspace --no-default-groups --group dev --group "${TORCH_GROUP}"
 
 # Stage II: Build
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-editable
+    uv sync --frozen --no-editable --no-default-groups --group dev --group "${TORCH_GROUP}"
 
 RUN userdel --remove ubuntu 2>/dev/null || true \
     && useradd --create-home --uid 1000 app \
