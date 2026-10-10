@@ -39,7 +39,7 @@ concurrency:
 jobs:
   cuda-build:
     name: cuda-build (CUDA ${{ matrix.cuda }}, ${{ matrix.torch }})
-    runs-on: ubuntu-26.04
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
@@ -47,8 +47,10 @@ jobs:
         cuda: ["12.9.1", "13.3.1"]
         include:
           - cuda: "12.9.1"
+            runner: ubuntu-24.04
             gcc: "14"
           - cuda: "13.3.1"
+            runner: ubuntu-26.04
             gcc: "15"
     steps:
       - name: Checkout repository

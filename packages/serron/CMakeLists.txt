@@ -248,11 +248,11 @@ foreach(_target IN LISTS _serron_targets)
     endif()
 endforeach()
 
-target_link_libraries(_C PRIVATE "$<TARGET_FILE:torch_cpu>")
+target_link_libraries(_C PRIVATE "$<TARGET_LINKER_FILE:torch_cpu>")
 
 if(SERRON_CUDA)
     target_include_directories(_C_cuda PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
-    target_link_libraries(_C_cuda PRIVATE "$<TARGET_FILE:torch_cpu>" CUDA::cudart)
+    target_link_libraries(_C_cuda PRIVATE "$<TARGET_LINKER_FILE:torch_cpu>" CUDA::cudart)
 endif()
 
 install(TARGETS ${_serron_targets} LIBRARY DESTINATION serron)
