@@ -1,7 +1,9 @@
 #include "ops.h"
 
+// Generated from forward_kernels.cu by cmake/embed_fatbin.cmake.
 #include <cuda/morphology/entry_points.h>
 #include <cuda/morphology/enums.h>
+#include <cuda/morphology/kernel_tables.h>
 #include <cuda/morphology/separable.h>
 #include <cuda/utils/border_mode.h>
 #include <cuda/utils/declarations.h>
@@ -11,36 +13,40 @@
 #include <cuda_runtime.h>
 
 #include <compat/check.h>
+#include <forward_fatbin.h>
 #include <torch/csrc/stable/accelerator.h>
 #include <torch/csrc/stable/ops.h>
 #include <torch/headeronly/core/Dispatch_v2.h>
 #include <torch/headeronly/core/ScalarType.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 
 namespace serron {
 
-// Host-side handles of the entry points defined in forward_kernels.cu.
-#define SERRON_DECLARE_FORWARD_ENTRY_POINTS(Op, op, scalar_t, suffix)                                                  \
-    SERRON_FORWARD_KERNELS(SERRON_DECLARE_ENTRY_POINT, op, scalar_t, suffix)
-#define SERRON_DECLARE_FORWARD_ENTRY_POINTS_FOR_DTYPE(scalar_t, suffix)                                                \
-    SERRON_CUDA_FOR_EACH_OP(SERRON_DECLARE_FORWARD_ENTRY_POINTS, scalar_t, suffix)
-SERRON_CUDA_FOR_EACH_DTYPE(SERRON_DECLARE_FORWARD_ENTRY_POINTS_FOR_DTYPE)
-
 namespace {
 
-/// Forward entry points for @p op on @c scalar_t; specialised per dtype below.
+/// The forward kernels' fatbin, embedded at build time and loaded on first use.
+cudaLibrary_t forward_library() {
+    static const cudaLibrary_t library = load_kernel_library(serron_forward_fatbin, "forward");
+    return library;
+}
+
+/// Forward entry points for @p op on @c scalar_t, looked up by name on first use; specialised per dtype below.
 template <typename scalar_t>
 const ForwardKernels<scalar_t>& forward_kernels(MorphOp op);
 
 #define SERRON_FORWARD_TABLE_ROW(Op, op, scalar_t, suffix)                                                             \
-    {SERRON_FORWARD_KERNELS(SERRON_ENTRY_POINT_NAME, op, scalar_t, suffix)},
+    ForwardKernels<scalar_t>{SERRON_FORWARD_KERNELS(SERRON_GET_ENTRY_POINT, op, scalar_t, suffix)},
 #define SERRON_FORWARD_TABLE(scalar_t, suffix)                                                                         \
     template <>                                                                                                        \
     const ForwardKernels<scalar_t>& forward_kernels<scalar_t>(const MorphOp op) {                                      \
-        static constexpr ForwardKernels<scalar_t> table[] = {                                                          \
-            SERRON_CUDA_FOR_EACH_OP(SERRON_FORWARD_TABLE_ROW, scalar_t, suffix)};                                      \
+        static const std::array<ForwardKernels<scalar_t>, 2> table = [] {                                              \
+            const cudaLibrary_t library = forward_library();                                                           \
+            return std::array<ForwardKernels<scalar_t>, 2>{                                                            \
+                SERRON_CUDA_FOR_EACH_OP(SERRON_FORWARD_TABLE_ROW, scalar_t, suffix)};                                  \
+        }();                                                                                                           \
         return table[static_cast<int>(op)];                                                                            \
     }
 SERRON_CUDA_FOR_EACH_DTYPE(SERRON_FORWARD_TABLE)

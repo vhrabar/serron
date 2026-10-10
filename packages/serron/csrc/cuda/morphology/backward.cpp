@@ -3,6 +3,7 @@
 #include <cuda/morphology/arg_tap.h>
 #include <cuda/morphology/entry_points.h>
 #include <cuda/morphology/enums.h>
+#include <cuda/morphology/kernel_tables.h>
 #include <cuda/morphology/separable.h>
 #include <cuda/utils/border_mode.h>
 #include <cuda/utils/declarations.h>
@@ -11,6 +12,7 @@
 
 #include <cuda_runtime.h>
 
+#include <backward_fatbin.h>
 #include <compat/acc_type.h>
 #include <compat/check.h>
 #include <torch/csrc/stable/accelerator.h>
@@ -19,31 +21,34 @@
 #include <torch/headeronly/core/ScalarType.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <tuple>
 
 namespace serron {
 
-// Host-side handles of the entry points defined in backward_kernels.cu.
-#define SERRON_DECLARE_BACKWARD_ENTRY_POINTS(Op, op, scalar_t, suffix)                                                 \
-    SERRON_BACKWARD_KERNELS(SERRON_DECLARE_ENTRY_POINT, op, scalar_t, suffix)
-#define SERRON_DECLARE_BACKWARD_ENTRY_POINTS_FOR_DTYPE(scalar_t, suffix)                                               \
-    SERRON_CUDA_FOR_EACH_OP(SERRON_DECLARE_BACKWARD_ENTRY_POINTS, scalar_t, suffix)
-SERRON_CUDA_FOR_EACH_DTYPE(SERRON_DECLARE_BACKWARD_ENTRY_POINTS_FOR_DTYPE)
-
 namespace {
 
-/// Backward entry points for @p op on @c scalar_t; specialised per dtype below.
+/// The backward kernels' fatbin, embedded at build time and loaded on first use.
+cudaLibrary_t backward_library() {
+    static const cudaLibrary_t library = load_kernel_library(serron_backward_fatbin, "backward");
+    return library;
+}
+
+/// Backward entry points for @p op on @c scalar_t, looked up by name on first use; specialised per dtype below.
 template <typename scalar_t>
 const BackwardKernels<scalar_t>& backward_kernels(MorphOp op);
 
 #define SERRON_BACKWARD_TABLE_ROW(Op, op, scalar_t, suffix)                                                            \
-    {SERRON_BACKWARD_KERNELS(SERRON_ENTRY_POINT_NAME, op, scalar_t, suffix)},
+    BackwardKernels<scalar_t>{SERRON_BACKWARD_KERNELS(SERRON_GET_ENTRY_POINT, op, scalar_t, suffix)},
 #define SERRON_BACKWARD_TABLE(scalar_t, suffix)                                                                        \
     template <>                                                                                                        \
     const BackwardKernels<scalar_t>& backward_kernels<scalar_t>(const MorphOp op) {                                    \
-        static constexpr BackwardKernels<scalar_t> table[] = {                                                         \
-            SERRON_CUDA_FOR_EACH_OP(SERRON_BACKWARD_TABLE_ROW, scalar_t, suffix)};                                     \
+        static const std::array<BackwardKernels<scalar_t>, 2> table = [] {                                             \
+            const cudaLibrary_t library = backward_library();                                                          \
+            return std::array<BackwardKernels<scalar_t>, 2>{                                                           \
+                SERRON_CUDA_FOR_EACH_OP(SERRON_BACKWARD_TABLE_ROW, scalar_t, suffix)};                                 \
+        }();                                                                                                           \
         return table[static_cast<int>(op)];                                                                            \
     }
 SERRON_CUDA_FOR_EACH_DTYPE(SERRON_BACKWARD_TABLE)

@@ -1,6 +1,8 @@
 #ifndef SERRON_CUDA_SMEM_H
 #define SERRON_CUDA_SMEM_H
 
+#include <cuda/utils/launch.h>
+
 #include <cuda_runtime.h>
 
 #include <compat/check.h>
@@ -36,20 +38,21 @@ inline size_t smem_budget() {
  * Raises @p kernel's dynamic shared-memory ceiling to @p bytes.
  *
  *
- * @tparam KernelFn  Type of the @c __global__ function being configured.
- * @param kernel     Kernel whose ceiling is being raised.
- * @param bytes      Dynamic shared memory the launch will request.
+ * @tparam Fn      Function type of the entry point being configured.
+ * @param kernel   Kernel whose ceiling is being raised.
+ * @param bytes    Dynamic shared memory the launch will request.
  */
-template <typename KernelFn>
-bool configure_kernel_smem(KernelFn kernel, const size_t bytes) {
+template <typename Fn>
+bool configure_kernel_smem(const Kernel<Fn> kernel, const size_t bytes) {
     if (bytes <= DEFAULT_SMEM_PER_BLOCK) {
         return true;
     }
     if (bytes > smem_budget()) {
         return false;
     }
-    const cudaError_t status = cudaFuncSetAttribute(
-        reinterpret_cast<const void*>(kernel), cudaFuncAttributeMaxDynamicSharedMemorySize, static_cast<int>(bytes));
+    const cudaError_t status =
+        cudaFuncSetAttribute(reinterpret_cast<const void*>(kernel.handle), cudaFuncAttributeMaxDynamicSharedMemorySize,
+                             static_cast<int>(bytes));
     if (status != cudaSuccess) {
         (void)cudaGetLastError();
         return false;

@@ -64,11 +64,8 @@ static_assert(static_cast<int>(MorphOp::kErode) == 0 && static_cast<int>(MorphOp
     X(row_argreduce, serron_morphology_row_argreduce_##op##_##suffix, BackwardRowArgreduceFn, scalar_t)                \
     X(col_argreduce, serron_morphology_col_argreduce_##op##_##suffix, BackwardColArgreduceFn, scalar_t)
 
-/// Expands to the @c extern "C" declaration of entry point @c name, for the host code that launches it.
-#define SERRON_DECLARE_ENTRY_POINT(member, name, Fn, scalar_t) extern "C" Fn<scalar_t> name;
-
-/// Expands to @c name followed by a comma, for a kernel-table row.
-#define SERRON_ENTRY_POINT_NAME(member, name, Fn, scalar_t) name,
+/// Expands to the lookup of entry point @c name in @c library, for a kernel-table row.
+#define SERRON_GET_ENTRY_POINT(member, name, Fn, scalar_t) get_kernel<Fn<scalar_t>>(library, #name),
 
 /// Expands to a @c static_assert that entry point @c name has function type @c Fn<scalar_t>.
 #define SERRON_CHECK_ENTRY_POINT_TYPE(member, name, Fn, scalar_t)                                                      \
@@ -119,32 +116,6 @@ using BackwardRowArgreduceFn = void(const scalar_t*, scalar_t*, std::int32_t*, i
 template <typename scalar_t>
 using BackwardColArgreduceFn = void(const scalar_t*, const std::int32_t*, const scalar_t*, scalar_t*, scalar_t*,
                                     int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, BorderMode, bool);
-
-/**
- * Forward entry points for one (op, dtype).
- *
- * @tparam scalar_t  Element type the entry points were stamped out for.
- */
-template <typename scalar_t>
-struct ForwardKernels {
-    ForwardElementFn<scalar_t>* element;
-    ForwardTiledFn<scalar_t>* tiled;
-    ForwardLineFn<scalar_t>* line_row;
-    ForwardLineFn<scalar_t>* line_col;
-};
-
-/**
- * Backward entry points for one (op, dtype).
- *
- * @tparam scalar_t  Element type the entry points were stamped out for.
- */
-template <typename scalar_t>
-struct BackwardKernels {
-    BackwardElementFn<scalar_t>* element;
-    BackwardTiledFn<scalar_t>* tiled;
-    BackwardRowArgreduceFn<scalar_t>* row_argreduce;
-    BackwardColArgreduceFn<scalar_t>* col_argreduce;
-};
 
 } // namespace serron
 

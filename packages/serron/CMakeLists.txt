@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.24)
+cmake_minimum_required(VERSION 3.27)
 
 if(NOT DEFINED CMAKE_CUDA_COMPILER)
     if(DEFINED ENV{CUDA_HOME})
@@ -123,15 +123,45 @@ add_library(_C SHARED
 )
 set(_serron_targets _C)
 
+set(_serron_compiled_targets _C)
+
 if(SERRON_CUDA)
+    find_program(SERRON_BIN2C bin2c HINTS "${CUDAToolkit_BIN_DIR}" REQUIRED)
+    set(_serron_generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
+
+    set(_serron_fatbin_headers)
+    foreach(_kernels IN ITEMS forward backward)
+        set(_fatbin_target _serron_${_kernels}_fatbin)
+        add_library(${_fatbin_target} OBJECT csrc/cuda/morphology/${_kernels}_kernels.cu)
+        set_target_properties(${_fatbin_target} PROPERTIES CUDA_FATBIN_COMPILATION ON)
+        list(APPEND _serron_compiled_targets ${_fatbin_target})
+
+        set(_header "${_serron_generated_dir}/${_kernels}_fatbin.h")
+        add_custom_command(
+                OUTPUT "${_header}"
+                COMMAND "${CMAKE_COMMAND}"
+                        -DBIN2C=${SERRON_BIN2C}
+                        -DINPUT=$<TARGET_OBJECTS:${_fatbin_target}>
+                        -DOUTPUT=${_header}
+                        -DNAME=serron_${_kernels}_fatbin
+                        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_fatbin.cmake"
+                DEPENDS ${_fatbin_target} $<TARGET_OBJECTS:${_fatbin_target}>
+                        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_fatbin.cmake"
+                COMMENT "Embedding the ${_kernels} kernels fatbin"
+                VERBATIM
+        )
+        list(APPEND _serron_fatbin_headers "${_header}")
+    endforeach()
+
     add_library(_C_cuda SHARED
             csrc/cuda/bindings.cpp
             csrc/cuda/morphology/operators.cpp
             csrc/cuda/morphology/backward.cpp
-            csrc/cuda/morphology/forward_kernels.cu
-            csrc/cuda/morphology/backward_kernels.cu
+            ${_serron_fatbin_headers}
     )
+    target_include_directories(_C_cuda PRIVATE "${_serron_generated_dir}")
     list(APPEND _serron_targets _C_cuda)
+    list(APPEND _serron_compiled_targets _C_cuda)
 endif()
 
 # Headers are listed only so IDEs index them; they are not compiled on their own.
@@ -161,6 +191,7 @@ if(SERRON_CUDA)
             csrc/cuda/morphology/arg_tap.h
             csrc/cuda/morphology/entry_points.h
             csrc/cuda/morphology/enums.h
+            csrc/cuda/morphology/kernel_tables.h
             csrc/cuda/morphology/ops_policy.cuh
             csrc/cuda/morphology/scan.cuh
             csrc/cuda/morphology/separable.h
@@ -175,11 +206,7 @@ set(SERRON_CUDA_NVCC_THREADS 1 CACHE STRING "nvcc --threads (per-.cu arch parall
 option(CUDA_SANITIZE "Build device code with -G for compute-sanitizer" OFF)
 
 
-foreach(_target IN LISTS _serron_targets)
-    # No "lib" prefix: the loader looks for _C / _C_cuda by those exact stems. No CPython tag either, which is
-    # what makes one wheel usable on every interpreter.
-    set_target_properties(${_target} PROPERTIES PREFIX "")
-
+foreach(_target IN LISTS _serron_compiled_targets)
     target_compile_options(${_target} PRIVATE
             $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:--threads=${SERRON_CUDA_NVCC_THREADS}>
             $<$<AND:$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>,$<CONFIG:Debug>>:-lineinfo>
@@ -205,6 +232,10 @@ foreach(_target IN LISTS _serron_targets)
             ${CMAKE_CURRENT_SOURCE_DIR}/csrc/compat
             ${TORCH_INCLUDE_DIRS}
     )
+endforeach()
+
+foreach(_target IN LISTS _serron_targets)
+    set_target_properties(${_target} PROPERTIES PREFIX "")
 
     if(NOT WIN32)
         set_target_properties(${_target} PROPERTIES
