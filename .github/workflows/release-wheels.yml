@@ -101,7 +101,7 @@ jobs:
         with:
           cuda: ${{ env.CUDA_VERSION }}
           method: local
-          linux-local-args: '["--toolkit"]'
+          linux-local-args: '["--toolkit", "--tmpdir=${{ runner.temp }}"]'
           use-github-cache: false
           log-file-suffix: "${{ matrix.arch }}.txt"
 

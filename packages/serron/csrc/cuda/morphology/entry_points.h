@@ -67,9 +67,18 @@ static_assert(static_cast<int>(MorphOp::kErode) == 0 && static_cast<int>(MorphOp
 /// Expands to the lookup of entry point @c name in @c library, for a kernel-table row.
 #define SERRON_GET_ENTRY_POINT(member, name, Fn, scalar_t) get_kernel<Fn<scalar_t>>(library, #name),
 
-/// Expands to a @c static_assert that entry point @c name has function type @c Fn<scalar_t>.
+/**
+ * Expands to a @c static_assert that entry point @c name has function type @c Fn<scalar_t>.
+ *
+ * Skipped when nvcc runs on MSVC: there the type of an @c extern "C" @c __global__ function does not compare equal
+ * to the plain alias even when the parameters match. The GCC and Clang builds check the same definitions.
+ */
+#if defined(_MSC_VER)
+#define SERRON_CHECK_ENTRY_POINT_TYPE(member, name, Fn, scalar_t)
+#else
 #define SERRON_CHECK_ENTRY_POINT_TYPE(member, name, Fn, scalar_t)                                                      \
     static_assert(std::is_same_v<decltype(name), Fn<scalar_t>>, #name " does not match " #Fn);
+#endif
 
 namespace serron {
 

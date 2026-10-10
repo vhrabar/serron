@@ -78,7 +78,7 @@ jobs:
         with:
           cuda: ${{ matrix.cuda }}
           method: local
-          linux-local-args: '["--toolkit"]'
+          linux-local-args: '["--toolkit", "--tmpdir=${{ runner.temp }}"]'
           use-github-cache: false
           log-file-suffix: "${{ matrix.cuda }}-${{ matrix.torch }}.txt"
 
@@ -112,12 +112,17 @@ jobs:
 
   cuda-build-windows:
     name: cuda-build-windows (CUDA ${{ matrix.cuda }}, ${{ matrix.torch }})
-    runs-on: windows-2025
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         torch: [cu132, cu132-newest]
         cuda: ["12.9.1", "13.3.1"]
+        include:
+          - cuda: "12.9.1"
+            runner: windows-2022
+          - cuda: "13.3.1"
+            runner: windows-2025
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
