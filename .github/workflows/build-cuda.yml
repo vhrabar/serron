@@ -4,6 +4,7 @@ permissions:
   contents: read
 
 on:
+  workflow_dispatch:
   push:
     branches: [dev, main]
     paths:
@@ -104,6 +105,44 @@ jobs:
         run: uv sync --no-install-workspace --no-default-groups --group dev --group ${{ matrix.torch }}
 
       # Build CUDA extension
+      - name: Compile CUDA extension
+        run: uv build --package serron --wheel --no-build-isolation
+        env:
+          CMAKE_BUILD_PARALLEL_LEVEL: "2"
+
+  cuda-build-windows:
+    name: cuda-build-windows (CUDA ${{ matrix.cuda }}, ${{ matrix.torch }})
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        torch: [cu132, cu132-newest]
+        cuda: ["12.9.1", "13.3.1"]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install CUDA toolkit
+        uses: Jimver/cuda-toolkit@v0.2.36
+        with:
+          cuda: ${{ matrix.cuda }}
+          method: local
+          use-github-cache: false
+          log-file-suffix: "windows-${{ matrix.cuda }}-${{ matrix.torch }}.txt"
+
+      - name: Verify toolchain
+        run: nvcc --version
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.14"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install build dependencies
+        run: uv sync --no-install-workspace --no-default-groups --group dev --group ${{ matrix.torch }}
+
       - name: Compile CUDA extension
         run: uv build --package serron --wheel --no-build-isolation
         env:
