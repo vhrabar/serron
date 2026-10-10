@@ -1,5 +1,6 @@
 #include "ops.h"
 
+#include <cuda/morphology/entry_points.cuh>
 #include <cuda/morphology/enums.cuh>
 #include <cuda/morphology/ops_policy.cuh>
 #include <cuda/morphology/scan.cuh>
@@ -49,10 +50,10 @@ namespace {
  * @param border                 Boundary mode (@ref BorderMode) for out-of-image reads.
  */
 template <typename scalar_t, typename Op>
-__global__ void morphology_kernel(const scalar_t* __restrict__ input, const scalar_t* __restrict__ kernel,
-                                  scalar_t* __restrict__ output, const int64_t N, const int64_t C, const int64_t H,
-                                  const int64_t W, const int64_t kH, const int64_t kW,
-                                  const int64_t kernel_channel_stride, const BorderMode border) {
+__device__ __forceinline__ void
+morphology_kernel(const scalar_t* __restrict__ input, const scalar_t* __restrict__ kernel,
+                  scalar_t* __restrict__ output, const int64_t N, const int64_t C, const int64_t H, const int64_t W,
+                  const int64_t kH, const int64_t kW, const int64_t kernel_channel_stride, const BorderMode border) {
     using acc_t = acc_type<scalar_t, true>;
 
     const int64_t idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
@@ -119,10 +120,11 @@ __global__ void morphology_kernel(const scalar_t* __restrict__ input, const scal
  * @param border                 Boundary mode (@ref BorderMode) for out-of-image reads.
  */
 template <typename scalar_t, typename Op>
-__global__ void morphology_tiled_kernel(const scalar_t* __restrict__ input, const scalar_t* __restrict__ kernel,
-                                        scalar_t* __restrict__ output, const int64_t C, const int64_t H,
-                                        const int64_t W, const int64_t kH, const int64_t kW,
-                                        const int64_t kernel_channel_stride, const BorderMode border) {
+__device__ __forceinline__ void morphology_tiled_kernel(const scalar_t* __restrict__ input,
+                                                        const scalar_t* __restrict__ kernel,
+                                                        scalar_t* __restrict__ output, const int64_t C, const int64_t H,
+                                                        const int64_t W, const int64_t kH, const int64_t kW,
+                                                        const int64_t kernel_channel_stride, const BorderMode border) {
     using acc_t = acc_type<scalar_t, true>;
 
     const int64_t anchor_h = kH / 2;
@@ -206,9 +208,10 @@ enum class LineAxis : int { kRow = 0, kCol = 1 };
  * @param border     Boundary mode (@ref BorderMode) for out-of-image reads.
  */
 template <typename scalar_t, typename Op, LineAxis Axis>
-__global__ void morphology_line_kernel(const scalar_t* __restrict__ input, scalar_t* __restrict__ output,
-                                       const int64_t N, const int64_t C, const int64_t H, const int64_t W,
-                                       const int64_t k, const int64_t chunks, const BorderMode border) {
+__device__ __forceinline__ void morphology_line_kernel(const scalar_t* __restrict__ input,
+                                                       scalar_t* __restrict__ output, const int64_t N, const int64_t C,
+                                                       const int64_t H, const int64_t W, const int64_t k,
+                                                       const int64_t chunks, const BorderMode border) {
     using acc_t = acc_type<scalar_t, true>;
 
     const int64_t line_len = (Axis == LineAxis::kRow) ? W : H;
@@ -274,10 +277,76 @@ __global__ void morphology_line_kernel(const scalar_t* __restrict__ input, scala
     }
 }
 
+} // namespace
+
+/// Forward entry points for one (op, dtype): element-wise, tiled, and the row / column line passes.
+#define SERRON_FORWARD_ENTRY_POINTS(Op, op, scalar_t, suffix)                                                          \
+    extern "C" __global__ void serron_morphology_##op##_##suffix(                                                      \
+        const scalar_t* __restrict__ input, const scalar_t* __restrict__ kernel, scalar_t* __restrict__ output,        \
+        const int64_t N, const int64_t C, const int64_t H, const int64_t W, const int64_t kH, const int64_t kW,        \
+        const int64_t kernel_channel_stride, const BorderMode border) {                                                \
+        morphology_kernel<scalar_t, Op>(input, kernel, output, N, C, H, W, kH, kW, kernel_channel_stride, border);     \
+    }                                                                                                                  \
+    extern "C" __global__ void serron_morphology_tiled_##op##_##suffix(                                                \
+        const scalar_t* __restrict__ input, const scalar_t* __restrict__ kernel, scalar_t* __restrict__ output,        \
+        const int64_t C, const int64_t H, const int64_t W, const int64_t kH, const int64_t kW,                         \
+        const int64_t kernel_channel_stride, const BorderMode border) {                                                \
+        morphology_tiled_kernel<scalar_t, Op>(input, kernel, output, C, H, W, kH, kW, kernel_channel_stride, border);  \
+    }                                                                                                                  \
+    extern "C" __global__ void serron_morphology_line_row_##op##_##suffix(                                             \
+        const scalar_t* __restrict__ input, scalar_t* __restrict__ output, const int64_t N, const int64_t C,           \
+        const int64_t H, const int64_t W, const int64_t k, const int64_t chunks, const BorderMode border) {            \
+        morphology_line_kernel<scalar_t, Op, LineAxis::kRow>(input, output, N, C, H, W, k, chunks, border);            \
+    }                                                                                                                  \
+    extern "C" __global__ void serron_morphology_line_col_##op##_##suffix(                                             \
+        const scalar_t* __restrict__ input, scalar_t* __restrict__ output, const int64_t N, const int64_t C,           \
+        const int64_t H, const int64_t W, const int64_t k, const int64_t chunks, const BorderMode border) {            \
+        morphology_line_kernel<scalar_t, Op, LineAxis::kCol>(input, output, N, C, H, W, k, chunks, border);            \
+    }
+
+#define SERRON_FORWARD_ENTRY_POINTS_FOR_DTYPE(scalar_t, suffix)                                                        \
+    SERRON_CUDA_FOR_EACH_OP(SERRON_FORWARD_ENTRY_POINTS, scalar_t, suffix)
+SERRON_CUDA_FOR_EACH_DTYPE(SERRON_FORWARD_ENTRY_POINTS_FOR_DTYPE)
+
+namespace {
+
+/**
+ * Forward entry points for one (op, dtype), as launched by @ref launch_morphology.
+ *
+ * @tparam scalar_t  Element type the entry points were stamped out for.
+ */
+template <typename scalar_t>
+struct ForwardKernels {
+    void (*element)(const scalar_t*, const scalar_t*, scalar_t*, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+                    int64_t, BorderMode);
+    void (*tiled)(const scalar_t*, const scalar_t*, scalar_t*, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+                  BorderMode);
+    void (*line_row)(const scalar_t*, scalar_t*, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, BorderMode);
+    void (*line_col)(const scalar_t*, scalar_t*, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, BorderMode);
+};
+
+/// Forward entry points for @p op on @c scalar_t; specialised per dtype below.
+template <typename scalar_t>
+const ForwardKernels<scalar_t>& forward_kernels(MorphOp op);
+
+#define SERRON_FORWARD_TABLE_ROW(Op, op, scalar_t, suffix)                                                             \
+    {serron_morphology_##op##_##suffix, serron_morphology_tiled_##op##_##suffix,                                       \
+     serron_morphology_line_row_##op##_##suffix, serron_morphology_line_col_##op##_##suffix},
+
+#define SERRON_FORWARD_TABLE(scalar_t, suffix)                                                                         \
+    template <>                                                                                                        \
+    const ForwardKernels<scalar_t>& forward_kernels<scalar_t>(const MorphOp op) {                                      \
+        static constexpr ForwardKernels<scalar_t> table[] = {                                                          \
+            SERRON_CUDA_FOR_EACH_OP(SERRON_FORWARD_TABLE_ROW, scalar_t, suffix)};                                      \
+        return table[static_cast<int>(op)];                                                                            \
+    }
+SERRON_CUDA_FOR_EACH_DTYPE(SERRON_FORWARD_TABLE)
+
 /**
  * Chains the row pass (@p input -> @p scratch) into the column pass (@p scratch ->
  * @p output). Requires the structuring element to be flat and axis-separable
  *
+ * @param kernels  Entry points for the (op, dtype) being launched.
  * @param input    Input image, contiguous (N, C, H, W).
  * @param scratch  Intermediate buffer, same shape/dtype as @p input; holds the row-pass result.
  * @param output   Output image, contiguous (N, C, H, W).
@@ -290,9 +359,10 @@ __global__ void morphology_line_kernel(const scalar_t* __restrict__ input, scala
  * @param border   Boundary mode (@ref BorderMode) for out-of-image reads.
  * @param stream   CUDA stream both passes are launched on.
  */
-template <typename scalar_t, typename Op>
-bool launch_morphology_separable(const scalar_t* input, scalar_t* scratch, scalar_t* output, int64_t N, int64_t C,
-                                 int64_t H, int64_t W, int64_t kH, int64_t kW, BorderMode border, cudaStream_t stream) {
+template <typename scalar_t>
+bool launch_morphology_separable(const ForwardKernels<scalar_t>& kernels, const scalar_t* input, scalar_t* scratch,
+                                 scalar_t* output, int64_t N, int64_t C, int64_t H, int64_t W, int64_t kH, int64_t kW,
+                                 BorderMode border, cudaStream_t stream) {
     const dim3 block(LINE_TILE);
     const size_t budget = smem_budget();
 
@@ -301,22 +371,19 @@ bool launch_morphology_separable(const scalar_t* input, scalar_t* scratch, scala
     const size_t smem_row = line_smem_bytes(chunks_row, kW, sizeof(scalar_t));
     const size_t smem_col = line_smem_bytes(chunks_col, kH, sizeof(scalar_t));
 
-    if (!configure_kernel_smem(morphology_line_kernel<scalar_t, Op, LineAxis::kRow>, smem_row) ||
-        !configure_kernel_smem(morphology_line_kernel<scalar_t, Op, LineAxis::kCol>, smem_col)) {
+    if (!configure_kernel_smem(kernels.line_row, smem_row) || !configure_kernel_smem(kernels.line_col, smem_col)) {
         return false;
     }
 
     const int64_t out_row = chunks_row * kW - kW + 1;
     const dim3 grid_row(static_cast<unsigned int>((W + out_row - 1) / out_row), static_cast<unsigned int>(H),
                         static_cast<unsigned int>(N * C));
-    morphology_line_kernel<scalar_t, Op, LineAxis::kRow>
-        <<<grid_row, block, smem_row, stream>>>(input, scratch, N, C, H, W, kW, chunks_row, border);
+    kernels.line_row<<<grid_row, block, smem_row, stream>>>(input, scratch, N, C, H, W, kW, chunks_row, border);
 
     const int64_t out_col = chunks_col * kH - kH + 1;
     const dim3 grid_col(static_cast<unsigned int>((H + out_col - 1) / out_col), static_cast<unsigned int>(W),
                         static_cast<unsigned int>(N * C));
-    morphology_line_kernel<scalar_t, Op, LineAxis::kCol>
-        <<<grid_col, block, smem_col, stream>>>(scratch, output, N, C, H, W, kH, chunks_col, border);
+    kernels.line_col<<<grid_col, block, smem_col, stream>>>(scratch, output, N, C, H, W, kH, chunks_col, border);
     return true;
 }
 
@@ -324,14 +391,15 @@ bool launch_morphology_separable(const scalar_t* input, scalar_t* scratch, scala
  * Launch the morphology forward pass on @p stream.
  *
  */
-template <typename scalar_t, typename Op>
-void launch_morphology(const scalar_t* input, const scalar_t* kernel, scalar_t* output, scalar_t* scratch,
-                       bool use_separable, int64_t N, int64_t C, int64_t H, int64_t W, int64_t kH, int64_t kW,
-                       int64_t kernel_channel_stride, BorderMode border, cudaStream_t stream) {
+template <typename scalar_t>
+void launch_morphology(const ForwardKernels<scalar_t>& kernels, const scalar_t* input, const scalar_t* kernel,
+                       scalar_t* output, scalar_t* scratch, bool use_separable, int64_t N, int64_t C, int64_t H,
+                       int64_t W, int64_t kH, int64_t kW, int64_t kernel_channel_stride, BorderMode border,
+                       cudaStream_t stream) {
     const size_t budget = smem_budget();
 
     if (use_separable && line_smem_bytes(1, std::max(kH, kW), sizeof(scalar_t)) <= budget &&
-        launch_morphology_separable<scalar_t, Op>(input, scratch, output, N, C, H, W, kH, kW, border, stream)) {
+        launch_morphology_separable<scalar_t>(kernels, input, scratch, output, N, C, H, W, kH, kW, border, stream)) {
         return;
     }
 
@@ -340,41 +408,17 @@ void launch_morphology(const scalar_t* input, const scalar_t* kernel, scalar_t* 
     const size_t smem = (static_cast<size_t>(tile_h * tile_w) + static_cast<size_t>(kH * kW)) * sizeof(scalar_t);
 
     // Tile if it fits, element-wise otherwise
-    if (smem <= budget && configure_kernel_smem(morphology_tiled_kernel<scalar_t, Op>, smem)) {
+    if (smem <= budget && configure_kernel_smem(kernels.tiled, smem)) {
         constexpr dim3 block(TILE_X, TILE_Y);
         const dim3 grid(static_cast<unsigned int>((W + TILE_X - 1) / TILE_X),
                         static_cast<unsigned int>((H + TILE_Y - 1) / TILE_Y), static_cast<unsigned int>(N * C));
-        morphology_tiled_kernel<scalar_t, Op>
-            <<<grid, block, smem, stream>>>(input, kernel, output, C, H, W, kH, kW, kernel_channel_stride, border);
+        kernels.tiled<<<grid, block, smem, stream>>>(input, kernel, output, C, H, W, kH, kW, kernel_channel_stride,
+                                                     border);
     } else {
         const int64_t total = N * C * H * W;
         const auto blocks = static_cast<unsigned int>((total + THREADS - 1) / THREADS);
-        morphology_kernel<scalar_t, Op>
-            <<<blocks, THREADS, 0, stream>>>(input, kernel, output, N, C, H, W, kH, kW, kernel_channel_stride, border);
-    }
-}
-
-/**
- * Launches the dtype-specialised kernel selected by @p op.
- *
- * Hoisted out of the dispatch macro deliberately: THO_DISPATCH_V2's body cannot contain an unprotected comma, and
- * neither the one in @c launch_morphology<scalar_t, ErodeOp> nor the ones in a @c <<<>>> launch configuration
- * survive macro argument splitting.
- */
-template <typename scalar_t>
-void launch_morphology_for(const MorphOp op, const scalar_t* input, const scalar_t* kernel, scalar_t* output,
-                           scalar_t* scratch, const bool use_separable, const int64_t N, const int64_t C,
-                           const int64_t H, const int64_t W, const int64_t kH, const int64_t kW,
-                           const int64_t kernel_channel_stride, const BorderMode border, cudaStream_t stream) {
-    switch (op) {
-    case MorphOp::kErode:
-        launch_morphology<scalar_t, ErodeOp>(input, kernel, output, scratch, use_separable, N, C, H, W, kH, kW,
-                                             kernel_channel_stride, border, stream);
-        break;
-    case MorphOp::kDilate:
-        launch_morphology<scalar_t, DilateOp>(input, kernel, output, scratch, use_separable, N, C, H, W, kH, kW,
-                                              kernel_channel_stride, border, stream);
-        break;
+        kernels.element<<<blocks, THREADS, 0, stream>>>(input, kernel, output, N, C, H, W, kH, kW,
+                                                        kernel_channel_stride, border);
     }
 }
 
@@ -443,10 +487,10 @@ Tensor morphology_impl(const Tensor& input, const Tensor& kernel, int64_t border
 
     THO_DISPATCH_V2(input_c.scalar_type(), "serron_morphology", AT_WRAP([&] {
                         scalar_t* scratch_ptr = use_separable ? scratch.mutable_data_ptr<scalar_t>() : nullptr;
-                        launch_morphology_for<scalar_t>(op, input_c.const_data_ptr<scalar_t>(),
-                                                        kernel_c.const_data_ptr<scalar_t>(),
-                                                        output.mutable_data_ptr<scalar_t>(), scratch_ptr, use_separable,
-                                                        N, C, H, W, kH, kW, kernel_channel_stride, border_mode, stream);
+                        launch_morphology<scalar_t>(forward_kernels<scalar_t>(op), input_c.const_data_ptr<scalar_t>(),
+                                                    kernel_c.const_data_ptr<scalar_t>(),
+                                                    output.mutable_data_ptr<scalar_t>(), scratch_ptr, use_separable, N,
+                                                    C, H, W, kH, kW, kernel_channel_stride, border_mode, stream);
                     }),
                     torch::headeronly::ScalarType::Float, torch::headeronly::ScalarType::Double,
                     torch::headeronly::ScalarType::Half, torch::headeronly::ScalarType::BFloat16);

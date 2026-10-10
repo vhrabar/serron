@@ -154,6 +154,7 @@ if(SERRON_CUDA)
             csrc/cuda/utils/declarations.cuh
             csrc/compat/cuda_launch_check.cuh
             csrc/cuda/utils/smem.cuh
+            csrc/cuda/morphology/entry_points.cuh
             csrc/cuda/morphology/enums.cuh
             csrc/cuda/morphology/ops_policy.cuh
             csrc/cuda/morphology/scan.cuh
