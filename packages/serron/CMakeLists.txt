@@ -152,6 +152,7 @@ target_sources(_C PRIVATE ${_serron_headers})
 
 if(SERRON_CUDA)
     set(_serron_cuda_headers
+            csrc/compat/atomic.cuh
             csrc/cuda/utils/border_mode.h
             csrc/cuda/utils/boundaries.cuh
             csrc/cuda/utils/declarations.h

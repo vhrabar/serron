@@ -7,7 +7,7 @@
 #include <cuda_runtime.h>
 
 #include <compat/acc_type.h>
-#include <torch/headeronly/cuda/Atomic.h>
+#include <compat/atomic.cuh>
 
 #include <cstdint>
 #include <type_traits>
@@ -95,9 +95,9 @@ morphology_backward_kernel(const scalar_t* __restrict__ grad_output, const scala
 
     // The centre tap (di=anchor_h, dj=anchor_w) always resolves in-image, so a winner is guaranteed.
     const acc_t go = static_cast<acc_t>(grad_output[idx]);
-    gpuAtomicAdd(&grad_input_nc[best_in], static_cast<scalar_t>(go));
+    atomic_add(&grad_input_nc[best_in], static_cast<scalar_t>(go));
     if (need_kernel_grad) {
-        gpuAtomicAdd(&grad_kernel_c[best_k], static_cast<scalar_t>(Op::template se_grad_sign<acc_t>() * go));
+        atomic_add(&grad_kernel_c[best_k], static_cast<scalar_t>(Op::template se_grad_sign<acc_t>() * go));
     }
 }
 
@@ -210,10 +210,10 @@ morphology_backward_tiled_kernel(const scalar_t* __restrict__ grad_output, const
         return;
 
     const acc_t go = static_cast<acc_t>(grad_output[nc * H * W + h * W + w]);
-    gpuAtomicAdd(&grad_input[nc * H * W + ih * W + iw], static_cast<scalar_t>(go));
+    atomic_add(&grad_input[nc * H * W + ih * W + iw], static_cast<scalar_t>(go));
     if (need_kernel_grad) {
         scalar_t* grad_kernel_c = grad_kernel + c * kernel_channel_stride;
-        gpuAtomicAdd(&grad_kernel_c[best_k], static_cast<scalar_t>(Op::template se_grad_sign<acc_t>() * go));
+        atomic_add(&grad_kernel_c[best_k], static_cast<scalar_t>(Op::template se_grad_sign<acc_t>() * go));
     }
 }
 
@@ -410,10 +410,10 @@ __device__ __forceinline__ void morphology_col_argreduce_kernel(
         resolve_coord(iw, W, border);
 
         const acc_t go = static_cast<acc_t>(grad_output[plane + h * W + w]);
-        gpuAtomicAdd(&grad_input[plane + best_ih * W + iw], static_cast<scalar_t>(go));
+        atomic_add(&grad_input[plane + best_ih * W + iw], static_cast<scalar_t>(go));
         if (need_kernel_grad) {
-            gpuAtomicAdd(&grad_kernel_c[best_di * kW + dj],
-                         static_cast<scalar_t>(Op::template se_grad_sign<acc_t>() * go));
+            atomic_add(&grad_kernel_c[best_di * kW + dj],
+                       static_cast<scalar_t>(Op::template se_grad_sign<acc_t>() * go));
         }
     }
 }
