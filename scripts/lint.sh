@@ -50,6 +50,11 @@ stage_clang_format() {
     uvx "clang-format@${CLANG_FORMAT_VERSION}" --dry-run --Werror $files
 }
 
+stage_torch_floor() {
+    echo '== Torch floor =='
+    python3 scripts/check_torch_floor.py
+}
+
 stage_fix() {
     local rc=0 files
 
@@ -74,7 +79,7 @@ stage_fix() {
     return $rc
 }
 
-ALL_STAGES=(ruff-format ruff-check pyrefly clang-format)
+ALL_STAGES=(ruff-format ruff-check pyrefly clang-format torch-floor)
 
 run_stage() {
     case "$1" in
@@ -82,6 +87,7 @@ run_stage() {
     ruff-check) stage_ruff_check ;;
     pyrefly) stage_pyrefly ;;
     clang-format) stage_clang_format ;;
+    torch-floor) stage_torch_floor ;;
     fix) stage_fix ;;
     *)
         # A bad stage name is a usage error

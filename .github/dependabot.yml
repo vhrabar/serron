@@ -7,7 +7,17 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    versioning-strategy: increase-if-necessary
+    cooldown:
+      default-days: 7
+    ignore:
+      - dependency-name: "torch"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     groups:
+      dev-tools:
+        patterns: ["ruff", "pyrefly", "pytest", "pytest-*", "cmake", "ninja", "scikit-build-core"]
+      bench-and-stubs:
+        patterns: ["kornia", "*-stubs"]
       python:
         patterns: ["*"]
 

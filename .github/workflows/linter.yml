@@ -73,6 +73,15 @@ jobs:
           fi
           echo "Notes found under [Unreleased]."
 
+  torch-floor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Check torch floor is consistent
+        run: scripts/lint.sh torch-floor
+
   clang-format:
     runs-on: ubuntu-latest
     steps:
