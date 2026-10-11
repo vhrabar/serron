@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Portions derived from PyTorch (aten/src/ATen/AccumulateType.h)
+// Copyright (c) PyTorch contributors
+// see THIRD_PARTY_NOTICES for full copyright and license text.
 #ifndef SERRON_COMPAT_ACC_TYPE_H
 #define SERRON_COMPAT_ACC_TYPE_H
 

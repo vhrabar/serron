@@ -7,8 +7,8 @@ requires-python = ">=3.12"
 authors = [
     { name = "Vedran Hrabar", email = "vedran.hrabar@outlook.com" },
 ]
-license = "MIT"
-license-files = ["LICENSE"]
+license = "MIT AND BSD-3-Clause"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES"]
 keywords = [
     "cuda",
     "gpu",

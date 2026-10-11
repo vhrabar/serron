@@ -82,6 +82,9 @@ jobs:
       - name: Check torch floor is consistent
         run: scripts/lint.sh torch-floor
 
+      - name: Check packaged license copies
+        run: scripts/lint.sh license-copies
+
   clang-format:
     runs-on: ubuntu-latest
     steps:

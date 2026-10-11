@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Portions derived from PyTorch (torch/headeronly/cuda/Atomic.h)
+// Copyright (c) PyTorch contributors
+// see THIRD_PARTY_NOTICES for full copyright and license text.
 #ifndef SERRON_COMPAT_ATOMIC_CUH
 #define SERRON_COMPAT_ATOMIC_CUH
 

@@ -10,6 +10,20 @@ https://github.com/pytorch/pytorch
 License: BSD-3-Clause
 ================================================================================
 
+Used in (paths relative to packages/serron/):
+
+  csrc/cuda/utils/driver.h, csrc/cuda/utils/driver.cpp
+      runtime binding to the CUDA driver API (from c10/cuda/driver_api.h/.cpp)
+  csrc/compat/atomic.cuh
+      BFloat16 atomic add by compare-and-swap (from AtomicFPOp in
+      torch/headeronly/cuda/Atomic.h)
+  csrc/compat/acc_type.h
+      accumulate-type trait and its table (from ATen/AccumulateType.h)
+
+The compiled extension also includes code from PyTorch's header-only
+torch/headeronly headers (Half, BFloat16), which are inlined into it at build
+time.
+
 From PyTorch:
 
 Copyright (c) 2016-     Facebook, Inc            (Adam Paszke)
