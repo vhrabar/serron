@@ -112,6 +112,9 @@ jobs:
         env:
           CMAKE_BUILD_PARALLEL_LEVEL: "2"
 
+      - name: Check CUDA linkage
+        run: scripts/check_cuda_linkage.sh dist/serron-*.whl
+
   cuda-build-windows:
     name: cuda-build-windows (CUDA ${{ matrix.cuda }}, ${{ matrix.torch }})
     runs-on: ${{ matrix.runner }}

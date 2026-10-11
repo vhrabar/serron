@@ -2,8 +2,9 @@
 #define SERRON_CUDA_MORPHOLOGY_SEPARABLE_H
 
 #include <cuda/utils/declarations.h>
+#include <cuda/utils/driver.h>
 
-#include <cuda_runtime.h>
+#include <cuda.h>
 
 #include <compat/check.h>
 #include <compat/flatness.h>
@@ -62,17 +63,12 @@ inline int64_t line_chunks_per_block(const int64_t k, const int64_t line_len, co
     return std::min({by_smem, by_line, std::max(by_scan, by_outputs)});
 }
 
-/// Throws when @p status reports a failure, naming @p what.
-inline void check_cuda(const cudaError_t status, const char* what) {
-    SERRON_CHECK(status == cudaSuccess, "serron: ", what, " failed: ", cudaGetErrorString(status));
-}
-
 /**
  * True when @p kernel_c is a flat SE.
  *
  * Copies the structuring element to the host and scans it there. The copy is issued on the current stream and
  * waited on: torch's non-default streams are created non-blocking, so a null-stream copy would not be ordered
- * after whatever produced @p kernel_c.
+ * after whatever produced @p kernel_c. The copy runs on @p kernel_c's device, whichever device is current.
  *
  * @param kernel_c  Contiguous structuring element on a CUDA device.
  */
@@ -83,11 +79,15 @@ inline bool se_is_flat(const Tensor& kernel_c) {
     }
 
     std::vector<char> host(static_cast<size_t>(n) * static_cast<size_t>(kernel_c.element_size()));
-    const auto stream = static_cast<cudaStream_t>(
-        torch::stable::accelerator::getCurrentStream(kernel_c.get_device_index()).nativeHandle());
-    check_cuda(cudaMemcpyAsync(host.data(), kernel_c.const_data_ptr(), host.size(), cudaMemcpyDeviceToHost, stream),
-               "structuring-element copy");
-    check_cuda(cudaStreamSynchronize(stream), "structuring-element copy sync");
+    const torch::stable::accelerator::DeviceGuard device_guard(kernel_c.get_device_index());
+    const CurrentContextGuard context_guard(kernel_c.get_device_index());
+    const auto stream =
+        static_cast<CUstream>(torch::stable::accelerator::getCurrentStream(kernel_c.get_device_index()).nativeHandle());
+    const Driver& cu = driver();
+    check_cu(cu.cuMemcpyDtoHAsync(host.data(), reinterpret_cast<CUdeviceptr>(kernel_c.const_data_ptr()), host.size(),
+                                  stream),
+             "structuring-element copy");
+    check_cu(cu.cuStreamSynchronize(stream), "structuring-element copy sync");
 
     bool flat = false;
     THO_DISPATCH_V2(kernel_c.scalar_type(), "serron_se_is_flat_cuda",

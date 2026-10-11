@@ -160,6 +160,7 @@ if(SERRON_CUDA)
             csrc/cuda/bindings.cpp
             csrc/cuda/morphology/operators.cpp
             csrc/cuda/morphology/backward.cpp
+            csrc/cuda/utils/driver.cpp
             ${_serron_fatbin_headers}
     )
     target_include_directories(_C_cuda PRIVATE "${_serron_generated_dir}")
@@ -189,6 +190,7 @@ if(SERRON_CUDA)
             csrc/cuda/utils/border_mode.h
             csrc/cuda/utils/boundaries.cuh
             csrc/cuda/utils/declarations.h
+            csrc/cuda/utils/driver.h
             csrc/cuda/utils/launch.h
             csrc/cuda/utils/smem.h
             csrc/cuda/morphology/arg_tap.h
@@ -252,7 +254,7 @@ target_link_libraries(_C PRIVATE "$<TARGET_LINKER_FILE:torch_cpu>")
 
 if(SERRON_CUDA)
     target_include_directories(_C_cuda PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
-    target_link_libraries(_C_cuda PRIVATE "$<TARGET_LINKER_FILE:torch_cpu>" CUDA::cudart)
+    target_link_libraries(_C_cuda PRIVATE "$<TARGET_LINKER_FILE:torch_cpu>" ${CMAKE_DL_LIBS})
 endif()
 
 install(TARGETS ${_serron_targets} LIBRARY DESTINATION serron)

@@ -1,9 +1,10 @@
 #ifndef SERRON_CUDA_SMEM_H
 #define SERRON_CUDA_SMEM_H
 
+#include <cuda/utils/driver.h>
 #include <cuda/utils/launch.h>
 
-#include <cuda_runtime.h>
+#include <cuda.h>
 
 #include <compat/check.h>
 #include <torch/csrc/stable/accelerator.h>
@@ -26,9 +27,9 @@ inline size_t smem_budget() {
     SERRON_CHECK(device >= 0 && device < kMaxDevices, "serron: device index ", device, " out of range");
     if (cached[device] == 0) {
         int optin = 0;
-        const cudaError_t status = cudaDeviceGetAttribute(&optin, cudaDevAttrMaxSharedMemoryPerBlockOptin, device);
-        SERRON_CHECK(status == cudaSuccess,
-                     "serron: shared-memory attribute query failed: ", cudaGetErrorString(status));
+        check_cu(driver().cuDeviceGetAttribute(&optin, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN,
+                                               device_handle(static_cast<int>(device))),
+                 "shared-memory attribute query");
         cached[device] = static_cast<size_t>(optin);
     }
     return cached[device];
@@ -50,14 +51,10 @@ bool configure_kernel_smem(const Kernel<Fn> kernel, const size_t bytes) {
     if (bytes > smem_budget()) {
         return false;
     }
-    const cudaError_t status =
-        cudaFuncSetAttribute(reinterpret_cast<const void*>(kernel.handle), cudaFuncAttributeMaxDynamicSharedMemorySize,
-                             static_cast<int>(bytes));
-    if (status != cudaSuccess) {
-        (void)cudaGetLastError();
-        return false;
-    }
-    return true;
+    // The ceiling is per device, so it is set for the current one on every launch that needs it.
+    const auto device = device_handle(static_cast<int>(torch::stable::accelerator::getCurrentDeviceIndex()));
+    return driver().cuKernelSetAttribute(CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, static_cast<int>(bytes),
+                                         kernel.handle, device) == CUDA_SUCCESS;
 }
 
 } // namespace serron

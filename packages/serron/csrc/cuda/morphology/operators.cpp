@@ -7,10 +7,11 @@
 #include <cuda/morphology/separable.h>
 #include <cuda/utils/border_mode.h>
 #include <cuda/utils/declarations.h>
+#include <cuda/utils/driver.h>
 #include <cuda/utils/launch.h>
 #include <cuda/utils/smem.h>
 
-#include <cuda_runtime.h>
+#include <cuda.h>
 
 #include <compat/check.h>
 #include <forward_fatbin.h>
@@ -28,8 +29,8 @@ namespace serron {
 namespace {
 
 /// The forward kernels' fatbin, embedded at build time and loaded on first use.
-cudaLibrary_t forward_library() {
-    static const cudaLibrary_t library = load_kernel_library(serron_forward_fatbin, "forward");
+CUlibrary forward_library() {
+    static const CUlibrary library = load_kernel_library(serron_forward_fatbin, "forward");
     return library;
 }
 
@@ -43,7 +44,7 @@ const ForwardKernels<scalar_t>& forward_kernels(MorphOp op);
     template <>                                                                                                        \
     const ForwardKernels<scalar_t>& forward_kernels<scalar_t>(const MorphOp op) {                                      \
         static const std::array<ForwardKernels<scalar_t>, 2> table = [] {                                              \
-            const cudaLibrary_t library = forward_library();                                                           \
+            const CUlibrary library = forward_library();                                                               \
             return std::array<ForwardKernels<scalar_t>, 2>{                                                            \
                 SERRON_CUDA_FOR_EACH_OP(SERRON_FORWARD_TABLE_ROW, scalar_t, suffix)};                                  \
         }();                                                                                                           \
@@ -71,8 +72,8 @@ SERRON_CUDA_FOR_EACH_DTYPE(SERRON_FORWARD_TABLE)
 template <typename scalar_t>
 bool launch_morphology_separable(const ForwardKernels<scalar_t>& kernels, const scalar_t* input, scalar_t* scratch,
                                  scalar_t* output, int64_t N, int64_t C, int64_t H, int64_t W, int64_t kH, int64_t kW,
-                                 BorderMode border, cudaStream_t stream) {
-    const dim3 block(LINE_TILE);
+                                 BorderMode border, CUstream stream) {
+    const Dim3 block(LINE_TILE);
     const size_t budget = smem_budget();
 
     const int64_t chunks_row = line_chunks_per_block(kW, W, sizeof(scalar_t), budget);
@@ -85,13 +86,13 @@ bool launch_morphology_separable(const ForwardKernels<scalar_t>& kernels, const 
     }
 
     const int64_t out_row = chunks_row * kW - kW + 1;
-    const dim3 grid_row(static_cast<unsigned int>((W + out_row - 1) / out_row), static_cast<unsigned int>(H),
+    const Dim3 grid_row(static_cast<unsigned int>((W + out_row - 1) / out_row), static_cast<unsigned int>(H),
                         static_cast<unsigned int>(N * C));
     launch_kernel(kernels.line_row, grid_row, block, smem_row, stream, input, scratch, N, C, H, W, kW, chunks_row,
                   border);
 
     const int64_t out_col = chunks_col * kH - kH + 1;
-    const dim3 grid_col(static_cast<unsigned int>((H + out_col - 1) / out_col), static_cast<unsigned int>(W),
+    const Dim3 grid_col(static_cast<unsigned int>((H + out_col - 1) / out_col), static_cast<unsigned int>(W),
                         static_cast<unsigned int>(N * C));
     launch_kernel(kernels.line_col, grid_col, block, smem_col, stream, scratch, output, N, C, H, W, kH, chunks_col,
                   border);
@@ -106,7 +107,7 @@ template <typename scalar_t>
 void launch_morphology(const ForwardKernels<scalar_t>& kernels, const scalar_t* input, const scalar_t* kernel,
                        scalar_t* output, scalar_t* scratch, bool use_separable, int64_t N, int64_t C, int64_t H,
                        int64_t W, int64_t kH, int64_t kW, int64_t kernel_channel_stride, BorderMode border,
-                       cudaStream_t stream) {
+                       CUstream stream) {
     const size_t budget = smem_budget();
 
     if (use_separable && line_smem_bytes(1, std::max(kH, kW), sizeof(scalar_t)) <= budget &&
@@ -120,8 +121,8 @@ void launch_morphology(const ForwardKernels<scalar_t>& kernels, const scalar_t* 
 
     // Tile if it fits, element-wise otherwise
     if (smem <= budget && configure_kernel_smem(kernels.tiled, smem)) {
-        constexpr dim3 block(TILE_X, TILE_Y);
-        const dim3 grid(static_cast<unsigned int>((W + TILE_X - 1) / TILE_X),
+        constexpr Dim3 block(TILE_X, TILE_Y);
+        const Dim3 grid(static_cast<unsigned int>((W + TILE_X - 1) / TILE_X),
                         static_cast<unsigned int>((H + TILE_Y - 1) / TILE_Y), static_cast<unsigned int>(N * C));
         launch_kernel(kernels.tiled, grid, block, smem, stream, input, kernel, output, C, H, W, kH, kW,
                       kernel_channel_stride, border);
@@ -192,8 +193,9 @@ Tensor morphology_impl(const Tensor& input, const Tensor& kernel, int64_t border
     }
 
     const torch::stable::accelerator::DeviceGuard device_guard(input_c.get_device_index());
-    const auto stream = static_cast<cudaStream_t>(
-        torch::stable::accelerator::getCurrentStream(input_c.get_device_index()).nativeHandle());
+    const CurrentContextGuard context_guard(input_c.get_device_index());
+    const auto stream =
+        static_cast<CUstream>(torch::stable::accelerator::getCurrentStream(input_c.get_device_index()).nativeHandle());
     const auto border_mode = static_cast<BorderMode>(border);
 
     THO_DISPATCH_V2(input_c.scalar_type(), "serron_morphology", AT_WRAP([&] {
