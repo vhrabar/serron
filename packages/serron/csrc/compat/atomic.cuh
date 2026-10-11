@@ -19,8 +19,9 @@ namespace serron {
  *
  * Stands in for @c gpuAtomicAdd from torch/headeronly/cuda/Atomic.h, which first ships with torch 2.14; the
  * extension builds against 2.13. Covers the architectures in CMAKE_CUDA_ARCHITECTURES (sm_75 and newer): float,
- * double and Half use the native instruction, BFloat16 does from sm_80 and falls back to a compare-and-swap on the
- * enclosing 32-bit word below that.
+ * double and Half use the native instruction. BFloat16 goes through CUDA's atomicAdd from sm_80, which is native
+ * from sm_90 and a compare-and-swap inside CUDA's header below that; on sm_75 it is a compare-and-swap on the
+ * enclosing 32-bit word here.
  */
 __device__ __forceinline__ void atomic_add(float* address, const float val) {
     atomicAdd(address, val);
