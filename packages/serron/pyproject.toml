@@ -28,7 +28,7 @@ classifiers = [
 
     "Environment :: GPU",
     "Environment :: GPU :: NVIDIA CUDA",
-    "Environment :: GPU :: NVIDIA CUDA :: 12",                                                                                                                                                                                                                                          │ 117
+    "Environment :: GPU :: NVIDIA CUDA :: 12",
     "Environment :: GPU :: NVIDIA CUDA :: 13",
 
     "Intended Audience :: Developers",
