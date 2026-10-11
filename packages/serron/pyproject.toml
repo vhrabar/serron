@@ -1,14 +1,14 @@
 [project]
 name = "serron"
-version = "0.4.0"
+version = "0.5.0"
 description = "Mathematical Morphology module for PyTorch (CUDA), providing differentiable operators and learnable network layers."
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [
     { name = "Vedran Hrabar", email = "vedran.hrabar@outlook.com" },
 ]
-license = "MIT"
-license-files = ["LICENSE"]
+license = "MIT AND BSD-3-Clause"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES"]
 keywords = [
     "cuda",
     "gpu",
@@ -28,6 +28,7 @@ classifiers = [
 
     "Environment :: GPU",
     "Environment :: GPU :: NVIDIA CUDA",
+    "Environment :: GPU :: NVIDIA CUDA :: 12",
     "Environment :: GPU :: NVIDIA CUDA :: 13",
 
     "Intended Audience :: Developers",
@@ -55,12 +56,8 @@ classifiers = [
 ]
 
 dependencies = [
-    "torch>=2.14,<2.15",
+    "torch>=2.13",
 ]
-
-[project.optional-dependencies]
-cpu = ["torch>=2.14,<2.15"]
-cu132 = ["torch>=2.14,<2.15"]
 
 [project.urls]
 Homepage = "https://github.com/vhrabar/serron"
@@ -70,38 +67,22 @@ Changelog = "https://github.com/vhrabar/serron/blob/main/CHANGELOG.md"
 "Bug Tracker" = "https://github.com/vhrabar/serron/issues"
 
 
-[[tool.uv.index]]
-name = "pytorch-cpu"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
-
-[[tool.uv.index]]
-name = "pytorch-cu132"
-url = "https://download.pytorch.org/whl/cu132"
-explicit = true
-
-
-[tool.uv.sources]
-torch = [
-    { index = "pytorch-cpu", extra = "cpu" },
-    { index = "pytorch-cu132", extra = "cu132" },
-]
-
-
 [build-system]
-requires = ["scikit-build-core==1.0.3"]
+requires = ["scikit-build-core==1.1.1"]
 build-backend = "scikit_build_core.build"
 
 
 [dependency-groups]
-build = ["scikit-build-core==1.0.3", "cmake", "ninja"]
+build = ["scikit-build-core==1.1.1", "cmake", "ninja"]
 
 
 
 [tool.scikit-build]
 minimum-version = "build-system.requires"
-cmake.version = ">=3.24"
+cmake.version = ">=3.27"
 build-dir = "build/{wheel_tag}"
+
+wheel.py-api = "py3"
 
 wheel.packages = ["torch-ext/serron"]
 editable.rebuild = true

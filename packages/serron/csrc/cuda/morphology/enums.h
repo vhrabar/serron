@@ -1,5 +1,5 @@
-#ifndef SERRON_MORPHOLOGY_ENUMS_CUH
-#define SERRON_MORPHOLOGY_ENUMS_CUH
+#ifndef SERRON_CUDA_MORPHOLOGY_ENUMS_H
+#define SERRON_CUDA_MORPHOLOGY_ENUMS_H
 
 /**
  * Morpho types
@@ -9,4 +9,4 @@ enum class MorphOp : int {
     kDilate = 1, ///< max over (sample + se)
 };
 
-#endif // SERRON_MORPHOLOGY_ENUMS_CUH
+#endif // SERRON_CUDA_MORPHOLOGY_ENUMS_H

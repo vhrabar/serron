@@ -24,7 +24,7 @@ from tests.conftest import (
 
 
 def _gradcheck(func: Callable[..., torch.Tensor], inputs: tuple[torch.Tensor, ...]) -> bool:
-    return bool(torch.autograd.gradcheck(func, inputs, atol=1e-4, rtol=1e-3, fast_mode=True, nondet_tol=1e-5))
+    return torch.autograd.gradcheck(func, inputs, atol=1e-4, rtol=1e-3, fast_mode=True, nondet_tol=1e-5)
 
 
 def _inputs(rng: torch.Generator, shape: tuple[int, int, int, int] = (1, 2, 5, 5)) -> tuple[torch.Tensor, torch.Tensor]:

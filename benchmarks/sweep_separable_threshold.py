@@ -66,7 +66,9 @@ def main() -> None:
     args = parser.parse_args()
 
     ks = [int(x) for x in args.ks.split(",")]
-    rows, fwd_wins, both_wins = [], [], []
+    rows: list[list[str]] = []
+    fwd_wins: list[bool] = []
+    both_wins: list[bool] = []
 
     for k in ks:
         sep = _measure(args.shape, k, args.op, args.border, args.reps, min_k=k)

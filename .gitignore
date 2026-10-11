@@ -23,9 +23,6 @@ pip-wheel-metadata/
 # pytest
 .pytest_cache/
 
-# mypy
-.mypy_cache/
-
 # Ruff / linters
 .ruff_cache/
 
@@ -57,7 +54,7 @@ cmake-build-*/
 
 .vscode/
 .idea/
-.run/
+# .run/ holds shared run configurations and is tracked; .idea/ is per-developer workspace state.
 
 # -------------------------
 # GitHub Actions artifacts

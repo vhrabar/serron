@@ -18,7 +18,7 @@ from serron import BorderMode
 try:
     import kornia.morphology as km
 except ImportError:
-    km = None  # type: ignore[assignment]
+    km = None
 
 try:
     import cupy as cp
@@ -169,7 +169,7 @@ def _run_case(op: str, n: int, c: int, h: int, w: int, k: int) -> list[str]:
     else:
         times["kornia"] = "n/a"
 
-    if cupy_filter is not None:
+    if cupy_filter is not None and cp is not None:
         x_cp = cp.from_dlpack(x)  # zero-copy view of the same GPU buffer
         # size 1 on N and C keeps this a per-image 2-D filter, like every other path here
         times["cupy"] = _measure(lambda: cupy_filter(x_cp, size=(1, 1, k, k), mode="constant", cval=cval))

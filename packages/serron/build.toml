@@ -1,0 +1,47 @@
+[general]
+name = "serron"
+version = 1
+edition = 6
+license = "MIT"
+backends = [
+    "cuda",
+    "cpu",
+]
+
+[general.hub]
+repo-id = "vhrabar/serron"
+
+[torch]
+src = [
+    "torch-ext/torch_binding.cpp",
+    "torch-ext/torch_binding.h",
+]
+
+[kernel.morphology_cpu]
+language = "cpp-cpu"
+depends = ["torch"]
+src = [
+    "csrc/ops.h",
+    "csrc/cpu/morphology/backward.cpp",
+    "csrc/cpu/morphology/enums.h",
+    "csrc/cpu/morphology/operators.cpp",
+    "csrc/cpu/morphology/ops_policy.h",
+    "csrc/cpu/morphology/separable.h",
+    "csrc/cpu/utils/boundaries.h",
+]
+
+[kernel.morphology_cuda]
+language = "cpp-cuda"
+depends = ["torch"]
+src = [
+    "csrc/ops.h",
+    "csrc/cuda/morphology/backward.cu",
+    "csrc/cuda/morphology/enums.cuh",
+    "csrc/cuda/morphology/operators.cu",
+    "csrc/cuda/morphology/ops_policy.cuh",
+    "csrc/cuda/morphology/scan.cuh",
+    "csrc/cuda/morphology/separable.cuh",
+    "csrc/cuda/utils/boundaries.cuh",
+    "csrc/cuda/utils/declarations.cuh",
+    "csrc/cuda/utils/smem.cuh",
+]

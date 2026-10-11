@@ -18,7 +18,7 @@ def is_flat(kernel: torch.Tensor) -> bool:
     :param kernel: structuring-element tensor.
     :returns: ``True`` when every entry is ``0``.
     """
-    cached: tuple[int, bool] | None = _cache.get(kernel)  # type: ignore[no-untyped-call]
+    cached: tuple[int, bool] | None = _cache.get(kernel)
     version: int = kernel._version
     if cached is not None and cached[0] == version:
         return cached[1]

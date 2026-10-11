@@ -4,6 +4,8 @@ Autograd wrapper around the compiled serron CUDA kernels.
 
 from __future__ import annotations
 
+from typing import override
+
 import torch
 
 from . import _flatness
@@ -29,7 +31,8 @@ class _ErodeFunction(torch.autograd.Function):
     """Autograd binding for ``serron::erode`` / ``serron::erode_backward``."""
 
     @staticmethod
-    def forward(
+    @override
+    def forward(  # pyrefly: ignore[bad-override]
         ctx: torch.autograd.function.FunctionCtx, input_: torch.Tensor, kernel: torch.Tensor, border: int
     ) -> torch.Tensor:
         flat = _flatness.is_flat(kernel)
@@ -41,7 +44,8 @@ class _ErodeFunction(torch.autograd.Function):
         return result
 
     @staticmethod
-    def backward(
+    @override
+    def backward(  # pyrefly: ignore[bad-override]
         ctx: torch.autograd.function.FunctionCtx, grad_output: torch.Tensor
     ) -> tuple[torch.Tensor | None, torch.Tensor | None, None]:
         needs_input, needs_kernel = ctx.needs_input_grad[:2]  # type: ignore[attr-defined]
@@ -65,7 +69,8 @@ class _DilateFunction(torch.autograd.Function):
     """Autograd binding for ``serron::dilate`` / ``serron::dilate_backward``."""
 
     @staticmethod
-    def forward(
+    @override
+    def forward(  # pyrefly: ignore[bad-override]
         ctx: torch.autograd.function.FunctionCtx, input_: torch.Tensor, kernel: torch.Tensor, border: int
     ) -> torch.Tensor:
         flat = _flatness.is_flat(kernel)
@@ -77,7 +82,8 @@ class _DilateFunction(torch.autograd.Function):
         return result
 
     @staticmethod
-    def backward(
+    @override
+    def backward(  # pyrefly: ignore[bad-override]
         ctx: torch.autograd.function.FunctionCtx, grad_output: torch.Tensor
     ) -> tuple[torch.Tensor | None, torch.Tensor | None, None]:
         needs_input, needs_kernel = ctx.needs_input_grad[:2]  # type: ignore[attr-defined]

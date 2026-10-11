@@ -4,6 +4,8 @@ Learnable morphology layers (``torch.nn.Module``).
 
 from __future__ import annotations
 
+from typing import override
+
 import torch
 from torch import nn
 
@@ -34,6 +36,7 @@ class _MorphologyNd(nn.Module):
         with torch.no_grad():
             self.weight.zero_()
 
+    @override
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError
 
@@ -41,6 +44,7 @@ class _MorphologyNd(nn.Module):
 class Erosion2d(_MorphologyNd):
     """Learnable 2-D erosion layer."""
 
+    @override
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return F.erosion(x, self.weight, border=self.border)
 
@@ -48,6 +52,7 @@ class Erosion2d(_MorphologyNd):
 class Dilation2d(_MorphologyNd):
     """Learnable 2-D dilation layer."""
 
+    @override
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return F.dilation(x, self.weight, border=self.border)
 
@@ -55,6 +60,7 @@ class Dilation2d(_MorphologyNd):
 class Opening2d(_MorphologyNd):
     """Learnable 2-D opening layer."""
 
+    @override
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return F.opening(x, self.weight, border=self.border)
 
@@ -62,5 +68,6 @@ class Opening2d(_MorphologyNd):
 class Closing2d(_MorphologyNd):
     """Learnable 2-D closing layer."""
 
+    @override
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return F.closing(x, self.weight, border=self.border)
