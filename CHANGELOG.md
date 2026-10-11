@@ -12,9 +12,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
     built for torch 2.13 next to torch 2.14 raised
     `undefined symbol: _ZN3c104cuda29c10_cuda_check_implementationEiPKcS2_jb`, because the torch C++ ABI is not
     stable across minor releases and the metadata could only paper over it with an upper bound (#47).
+- The CUDA extension builds against torch 2.13, the declared floor. It included
+    `torch/headeronly/cuda/Atomic.h`, which first ships with torch 2.14; `csrc/compat/atomic.cuh` now provides the
+    atomic add for the four dtypes (#48).
+- Windows builds link torch's import library (`torch_cpu.lib`) instead of trying to link `torch_cpu.dll` (#48).
 
 ### Changed
 
+- The CUDA kernels no longer pin a CUDA major: one wheel loads next to a torch built against CUDA 12 or CUDA 13.
+    `_C_cuda` links neither `libcudart` nor `libcuda`; the kernels are embedded as fatbins, looked up by name and
+    launched through the CUDA driver API, which is opened at runtime. The requirement moves from a CUDA 13 torch
+    to an NVIDIA driver supporting CUDA 12.0 or newer (R525 / 525.60.13 on Linux, 528.33 on Windows), and the
+    release wheels are built with CUDA 12.9 (#48).
 - The compiled extensions are built against PyTorch's stable C++ ABI (`torch/csrc/stable`, `torch/headeronly`)
     rather than `at::` / `c10::` / `TORCH_LIBRARY`, so one wheel loads on torch 2.13 and every later release.
     The requirement is now `torch>=2.13` with no upper bound, where it was `torch>=2.14,<2.15`. Neither library

@@ -11,7 +11,7 @@ permissions:
 env:
   PACKAGE: serron
   PKG_DIR: packages/serron
-  CUDA_VERSION: "13.2.0"
+  CUDA_VERSION: "12.9.1"
   BUILD_PYTHON_TAG: cp312-cp312
   BUILD_PYTHON: "3.12"
   TORCH_INDEX: https://download.pytorch.org/whl/cu132
@@ -93,7 +93,7 @@ jobs:
 
       # The toolkit action runs its installer through sudo, which the manylinux image does not ship.
       - name: Install sudo and host compiler
-        run: dnf -y install sudo gcc-toolset-14-gcc gcc-toolset-14-gcc-c++
+        run: dnf -y install sudo binutils gcc-toolset-14-gcc gcc-toolset-14-gcc-c++
 
       - name: Install CUDA toolkit
         id: cuda-toolkit
@@ -134,6 +134,11 @@ jobs:
             --exclude 'libcublas*.so*' \
             --exclude 'libcuda.so*' \
             --exclude 'libnvToolsExt.so*'
+
+      - name: Check CUDA linkage
+        run: |
+          export PATH="/opt/python/${{ env.BUILD_PYTHON_TAG }}/bin:${PATH}"
+          scripts/check_cuda_linkage.sh dist/*.whl
 
       - uses: actions/upload-artifact@v7
         with:
@@ -192,10 +197,58 @@ jobs:
           print("serron", serron.__version__, "OK on torch", torch.__version__)
           EOF
 
+  smoke-test-cuda-load:
+    needs: [linux-wheels]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # cu129 only carries torch 2.13, the floor; cu132 takes the newest.
+          - index: cu129
+            cuda_major: "12"
+            torch: floor
+          - index: cu132
+            cuda_major: "13"
+            torch: newest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.BUILD_PYTHON }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: wheels-linux-x86_64
+          path: dist
+
+      - name: Install wheel with a CUDA ${{ matrix.cuda_major }} torch
+        env:
+          TORCH_AXIS: ${{ matrix.torch }}
+        run: |
+          torch_req="$(python "${GITHUB_WORKSPACE}/scripts/torch_req.py")"
+          echo "installing ${torch_req} from ${{ matrix.index }}"
+          python -m pip install --index-url "https://download.pytorch.org/whl/${{ matrix.index }}" "${torch_req}"
+          python -m pip install --no-index --find-links dist "${PACKAGE}"
+
+      - name: Import and check the CUDA kernels registered
+        working-directory: ${{ runner.temp }}
+        run: |
+          python - <<'EOF'
+          import torch
+          import serron
+
+          assert torch.version.cuda.split(".")[0] == "${{ matrix.cuda_major }}", torch.version.cuda
+          for op in ("erode", "dilate", "erode_backward", "dilate_backward"):
+              assert torch._C._dispatch_has_kernel_for_dispatch_key(f"serron::{op}", "CUDA"), op
+          print("serron", serron.__version__, "loads its CUDA kernels on torch", torch.__version__)
+          EOF
+
   # Windows wheel (x86_64)
   windows-wheel:
     needs: [verify]
-    runs-on: windows-2025
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v7
 
@@ -234,7 +287,7 @@ jobs:
   # Attach every artifact to the GitHub Release
   attach-to-release:
     if: github.event_name == 'release'
-    needs: [sdist, linux-wheels, smoke-test-cpu, windows-wheel]
+    needs: [sdist, linux-wheels, smoke-test-cpu, smoke-test-cuda-load, windows-wheel]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8

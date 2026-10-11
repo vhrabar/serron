@@ -115,6 +115,23 @@ jobs:
       - name: Check CUDA linkage
         run: scripts/check_cuda_linkage.sh dist/serron-*.whl
 
+      - name: Load next to a CUDA 12 torch
+        if: matrix.torch == 'cu132-newest'
+        working-directory: ${{ runner.temp }}
+        run: |
+          uv venv cu12 --python 3.14
+          uv pip install --python cu12 --index-url https://download.pytorch.org/whl/cu129 "torch==2.13.*"
+          uv pip install --python cu12 --no-deps "${GITHUB_WORKSPACE}"/dist/serron-*.whl
+          cu12/bin/python - <<'EOF'
+          import torch
+          import serron
+
+          assert torch.version.cuda.startswith("12."), torch.version.cuda
+          for op in ("erode", "dilate", "erode_backward", "dilate_backward"):
+              assert torch._C._dispatch_has_kernel_for_dispatch_key(f"serron::{op}", "CUDA"), op
+          print("serron loads its CUDA kernels on torch", torch.__version__)
+          EOF
+
   cuda-build-windows:
     name: cuda-build-windows (CUDA ${{ matrix.cuda }}, ${{ matrix.torch }})
     runs-on: ${{ matrix.runner }}
