@@ -16,7 +16,10 @@ every later release (`torch>=2.13`) rather than only the minor it was compiled a
 wheel carries no CPython tag either, because the compiled libraries use no CPython API.
 
 Wheels load on both CUDA and CPU-only torch builds; the CUDA kernels are only loaded when
-the installed torch has CUDA. The CUDA build requires a torch built against CUDA 13.
+the installed torch has CUDA. The CUDA kernels work with a torch built against CUDA 12 or
+CUDA 13: they bind to the NVIDIA driver at runtime rather than linking a CUDA runtime, so the
+only requirement is a driver supporting CUDA 12.0 or newer (R525 / 525.60.13 on Linux,
+528.33 on Windows).
 
 ## Usage
 

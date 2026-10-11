@@ -11,7 +11,20 @@ env:
 
 jobs:
   build-and-push:
+    name: build-and-push (${{ matrix.flavor }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - flavor: cuda12
+            cuda: "12.9.1"
+            ubuntu: "24.04"
+            torch_group: cu129
+          - flavor: cuda13
+            cuda: "13.3.0"
+            ubuntu: "26.04"
+            torch_group: cu132-newest
     permissions:
       contents: read
       packages: write
@@ -44,18 +57,46 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          flavor: |
+            suffix=-${{ matrix.flavor }},onlatest=true
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha
 
-      # build and push
-      - name: Build and push
+      # build into the local daemon first, so the image can be checked before anything is pushed
+      - name: Build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: serron:smoke
+          build-args: |
+            CUDA_VERSION=${{ matrix.cuda }}
+            UBUNTU_VERSION=${{ matrix.ubuntu }}
+            TORCH_GROUP=${{ matrix.torch_group }}
+          cache-from: type=gha,scope=${{ matrix.flavor }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.flavor }}
+
+      # No GPU on the runner, but the loader still opens _C_cuda whenever torch is a CUDA build, so this proves
+      # the extension resolves against the image's torch and CUDA runtime.
+      - name: Smoke test
+        run: |
+          docker run --rm serron:smoke python -c "
+          import torch, serron
+          assert torch.version.cuda.startswith('${{ matrix.cuda }}'.split('.')[0] + '.'), torch.version.cuda
+          print('torch', torch.__version__, 'cuda', torch.version.cuda, 'serron ok')
+          "
+
+      - name: Push
         uses: docker/build-push-action@v7
         with:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          build-args: |
+            CUDA_VERSION=${{ matrix.cuda }}
+            UBUNTU_VERSION=${{ matrix.ubuntu }}
+            TORCH_GROUP=${{ matrix.torch_group }}
+          cache-from: type=gha,scope=${{ matrix.flavor }}

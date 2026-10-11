@@ -50,6 +50,26 @@ stage_clang_format() {
     uvx "clang-format@${CLANG_FORMAT_VERSION}" --dry-run --Werror $files
 }
 
+LICENSE_COPIES=(LICENSE THIRD_PARTY_NOTICES)
+
+stage_license_copies() {
+    echo '== License copies =='
+    local rc=0 file
+    for file in "${LICENSE_COPIES[@]}"; do
+        if ! cmp -s "$file" "packages/serron/$file"; then
+            echo "packages/serron/$file differs from $file; copy it over (scripts/lint.sh fix does)" >&2
+            rc=1
+        fi
+    done
+    [ $rc -eq 0 ] && echo "${LICENSE_COPIES[*]} match their packaged copies."
+    return $rc
+}
+
+stage_torch_floor() {
+    echo '== Torch floor =='
+    python3 scripts/check_torch_floor.py
+}
+
 stage_fix() {
     local rc=0 files
 
@@ -70,11 +90,17 @@ stage_fix() {
         rc=1
     fi
 
+    echo '== License copies =='
+    local file
+    for file in "${LICENSE_COPIES[@]}"; do
+        cp "$file" "packages/serron/$file" || rc=1
+    done
+
     echo 'Note: pyrefly is type-check only and has no autofix.'
     return $rc
 }
 
-ALL_STAGES=(ruff-format ruff-check pyrefly clang-format)
+ALL_STAGES=(ruff-format ruff-check pyrefly clang-format torch-floor license-copies)
 
 run_stage() {
     case "$1" in
@@ -82,6 +108,8 @@ run_stage() {
     ruff-check) stage_ruff_check ;;
     pyrefly) stage_pyrefly ;;
     clang-format) stage_clang_format ;;
+    torch-floor) stage_torch_floor ;;
+    license-copies) stage_license_copies ;;
     fix) stage_fix ;;
     *)
         # A bad stage name is a usage error

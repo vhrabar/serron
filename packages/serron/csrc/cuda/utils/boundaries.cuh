@@ -2,17 +2,9 @@
 #define SERRON_BOUNDARIES_CUH
 
 #include <cuda/std/cstdint>
+#include <cuda/utils/border_mode.h>
 
 #include <cuda_runtime.h>
-
-/**
- * Boundary handling for out-of-image neighbourhood samples.
- */
-enum BorderMode : int {
-    kReflect = 0,   ///< mirror without repeating the edge sample (…cb|abcd|cb…)
-    kReplicate = 1, ///< clamp to the edge sample (…aa|abcd|dd…)
-    kConstant = 2,  ///< out-of-bounds resolved to the neutral element by the caller
-};
 
 /**
  * Map a possibly out-of-range coordinate back into [0, size) per @p border.

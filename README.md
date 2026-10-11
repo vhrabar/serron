@@ -2,7 +2,7 @@
 
 ![Python](https://img.shields.io/badge/python-%E2%89%A53.12-blue?style=for-the-badge&logo=python)
 ![PyTorch](https://img.shields.io/badge/pytorch-%E2%89%A52.13-ee4c2c?style=for-the-badge&logo=pytorch)
-![CUDA](https://img.shields.io/badge/cuda-13.X-76b900?style=for-the-badge&logo=nvidia)
+![CUDA](https://img.shields.io/badge/cuda-12%20%7C%2013-76b900?style=for-the-badge&logo=nvidia)
 ![PyPI Version](https://img.shields.io/pypi/v/serron?style=for-the-badge&logo=pypi&logoColor=orange)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge&logo=opensourceinitiative)
 
@@ -30,7 +30,10 @@ every later release (`torch>=2.13`) rather than only the minor it was compiled a
 wheel carries no CPython tag either, because the compiled libraries use no CPython API.
 
 Wheels load on both CUDA and CPU-only torch builds; the CUDA kernels are only loaded when
-the installed torch has CUDA. The CUDA build requires a torch built against CUDA 13.
+the installed torch has CUDA. The CUDA kernels work with a torch built against CUDA 12 or
+CUDA 13: they bind to the NVIDIA driver at runtime rather than linking a CUDA runtime, so the
+only requirement is a driver supporting CUDA 12.0 or newer (R525 / 525.60.13 on Linux,
+528.33 on Windows).
 
 ## Usage
 
@@ -216,7 +219,10 @@ uv sync --no-default-groups --group dev --group cpu        # CPU-only, oldest su
 
 ### Building the wheel
 
-Building the CUDA extension from source needs the CUDA 13.X toolkit (`nvcc`):
+Building the CUDA extension from source needs a CUDA toolkit (`nvcc` and `cuda.h`), 12.8 or newer for the
+default architecture list. The toolkit only matters at build time: the result runs next to a CUDA 12 or
+CUDA 13 torch either way, but it sets the minimum driver (any 12.x toolkit: R525; a 13.x toolkit: R580).
+The release wheels are built with CUDA 12.9:
 
 ```bash
 uv sync --no-install-workspace

@@ -11,8 +11,7 @@ permissions:
 env:
   PACKAGE: serron
   PKG_DIR: packages/serron
-  CUDA_MAJOR_MINOR: "13-2"
-  # The wheels are py3-none, so one interpreter builds for all of them. 3.12 is requires-python's floor.
+  CUDA_VERSION: "12.9.1"
   BUILD_PYTHON_TAG: cp312-cp312
   BUILD_PYTHON: "3.12"
   TORCH_INDEX: https://download.pytorch.org/whl/cu132
@@ -80,29 +79,40 @@ jobs:
           - arch: x86_64
             runner: ubuntu-latest
             container: quay.io/pypa/manylinux_2_28_x86_64
-            cuda_repo: rhel8/x86_64
           - arch: aarch64
             runner: ubuntu-24.04-arm
             container: quay.io/pypa/manylinux_2_28_aarch64
-            cuda_repo: rhel8/sbsa
     runs-on: ${{ matrix.runner }}
     container: ${{ matrix.container }}
+    env:
+      CC: /opt/rh/gcc-toolset-14/root/usr/bin/gcc
+      CXX: /opt/rh/gcc-toolset-14/root/usr/bin/g++
+      CUDAHOSTCXX: /opt/rh/gcc-toolset-14/root/usr/bin/g++
     steps:
       - uses: actions/checkout@v7
 
+      # The toolkit action runs its installer through sudo, which the manylinux image does not ship.
+      - name: Install sudo and host compiler
+        run: dnf -y install sudo binutils gcc-toolset-14-gcc gcc-toolset-14-gcc-c++
+
       - name: Install CUDA toolkit
-        run: |
-          dnf -y install dnf-plugins-core
-          dnf config-manager --add-repo \
-            "https://developer.download.nvidia.com/compute/cuda/repos/${{ matrix.cuda_repo }}/cuda-rhel8.repo"
-          dnf -y install "cuda-compiler-${CUDA_MAJOR_MINOR}" "cuda-libraries-devel-${CUDA_MAJOR_MINOR}"
+        id: cuda-toolkit
+        uses: Jimver/cuda-toolkit@v0.2.36
+        with:
+          cuda: ${{ env.CUDA_VERSION }}
+          method: local
+          linux-local-args: '["--toolkit", "--tmpdir=${{ runner.temp }}"]'
+          use-github-cache: false
+          log-file-suffix: "${{ matrix.arch }}.txt"
 
       - name: Build wheel
         env:
-          CUDA_HOME: /usr/local/cuda-13.2
+          CUDA_HOME: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}
           CMAKE_BUILD_PARALLEL_LEVEL: "2"
         run: |
-          export PATH="/usr/local/cuda-13.2/bin:/opt/python/${{ env.BUILD_PYTHON_TAG }}/bin:${PATH}"
+          export PATH="/opt/python/${{ env.BUILD_PYTHON_TAG }}/bin:${PATH}"
+          nvcc --version
+          "$CXX" --version
           python -m pip install --upgrade pip
           # CUDA-enabled torch used only to compile against (no build isolation). The spec comes from
           # ${PKG_DIR}/pyproject.toml [project].dependencies, so the wheel is built against the torch minor it declares.
@@ -124,6 +134,11 @@ jobs:
             --exclude 'libcublas*.so*' \
             --exclude 'libcuda.so*' \
             --exclude 'libnvToolsExt.so*'
+
+      - name: Check CUDA linkage
+        run: |
+          export PATH="/opt/python/${{ env.BUILD_PYTHON_TAG }}/bin:${PATH}"
+          scripts/check_cuda_linkage.sh dist/*.whl
 
       - uses: actions/upload-artifact@v7
         with:
@@ -182,10 +197,58 @@ jobs:
           print("serron", serron.__version__, "OK on torch", torch.__version__)
           EOF
 
+  smoke-test-cuda-load:
+    needs: [linux-wheels]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # cu129 only carries torch 2.13, the floor; cu132 takes the newest.
+          - index: cu129
+            cuda_major: "12"
+            torch: floor
+          - index: cu132
+            cuda_major: "13"
+            torch: newest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.BUILD_PYTHON }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: wheels-linux-x86_64
+          path: dist
+
+      - name: Install wheel with a CUDA ${{ matrix.cuda_major }} torch
+        env:
+          TORCH_AXIS: ${{ matrix.torch }}
+        run: |
+          torch_req="$(python "${GITHUB_WORKSPACE}/scripts/torch_req.py")"
+          echo "installing ${torch_req} from ${{ matrix.index }}"
+          python -m pip install --index-url "https://download.pytorch.org/whl/${{ matrix.index }}" "${torch_req}"
+          python -m pip install --no-index --find-links dist "${PACKAGE}"
+
+      - name: Import and check the CUDA kernels registered
+        working-directory: ${{ runner.temp }}
+        run: |
+          python - <<'EOF'
+          import torch
+          import serron
+
+          assert torch.version.cuda.split(".")[0] == "${{ matrix.cuda_major }}", torch.version.cuda
+          for op in ("erode", "dilate", "erode_backward", "dilate_backward"):
+              assert torch._C._dispatch_has_kernel_for_dispatch_key(f"serron::{op}", "CUDA"), op
+          print("serron", serron.__version__, "loads its CUDA kernels on torch", torch.__version__)
+          EOF
+
   # Windows wheel (x86_64)
   windows-wheel:
     needs: [verify]
-    runs-on: windows-2025
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v7
 
@@ -194,14 +257,16 @@ jobs:
           python-version: ${{ env.BUILD_PYTHON }}
 
       - name: Install CUDA toolkit
+        id: cuda-toolkit
         uses: Jimver/cuda-toolkit@v0.2.36
         with:
-          cuda: "13.2.0"
+          cuda: ${{ env.CUDA_VERSION }}
           method: local
+          use-github-cache: false
 
       - name: Verify CUDA CRT headers
         shell: cmd
-        run: dir "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2\include\crt"
+        run: dir "%CUDA_PATH%\include\crt"
 
       - name: Build wheel
         env:
@@ -222,7 +287,7 @@ jobs:
   # Attach every artifact to the GitHub Release
   attach-to-release:
     if: github.event_name == 'release'
-    needs: [sdist, linux-wheels, smoke-test-cpu, windows-wheel]
+    needs: [sdist, linux-wheels, smoke-test-cpu, smoke-test-cuda-load, windows-wheel]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8

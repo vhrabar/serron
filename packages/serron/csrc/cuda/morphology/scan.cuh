@@ -1,8 +1,9 @@
 #ifndef SERRON_MORPHOLOGY_SCAN_CUH
 #define SERRON_MORPHOLOGY_SCAN_CUH
 
+#include <cuda/morphology/arg_tap.h>
 #include <cuda/std/cstdint>
-#include <cuda/utils/declarations.cuh>
+#include <cuda/utils/declarations.h>
 
 #include <cuda_runtime.h>
 
@@ -70,17 +71,6 @@ __device__ __forceinline__ void scan_chunk_serial(scalar_t* chunk, const int64_t
         chunk[idx] = static_cast<scalar_t>(acc);
     }
 }
-
-/**
- * A candidate tap
- *
- * @tparam acc_t  Accumulate type of the value being reduced.
- */
-template <typename acc_t>
-struct ArgTap {
-    acc_t val;
-    cuda::std::int32_t idx;
-};
 
 /**
  * Combine two candidates
