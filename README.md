@@ -217,6 +217,13 @@ uv sync --no-default-groups --group dev --group cu132      # CUDA, oldest suppor
 uv sync --no-default-groups --group dev --group cpu        # CPU-only, oldest supported torch
 ```
 
+On Windows on ARM, the `cu134-win-arm64` group pulls NVIDIA's `+cu134` torch wheels from
+`https://pypi.nvidia.com/nvtorch_oot/`. 
+
+```bash
+uv sync --no-default-groups --group dev --group cu134-win-arm64 # Windows on ARM, CUDA 13.4
+```
+
 ### Building the wheel
 
 Building the CUDA extension from source needs a CUDA toolkit (`nvcc` and `cuda.h`), 12.8 or newer for the
