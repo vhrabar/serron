@@ -95,7 +95,9 @@ jobs:
 
       # The toolkit action runs its installer through sudo, which the manylinux image does not ship.
       - name: Install sudo and host compiler
-        run: dnf -y install sudo binutils gcc-toolset-14-gcc gcc-toolset-14-gcc-c++
+        run: |
+          dnf -y install sudo binutils gcc-toolset-14-gcc gcc-toolset-14-gcc-c++
+          mkdir -p /var/tmp/cuda-runfile
 
       - name: Install CUDA toolkit
         id: cuda-toolkit
@@ -103,7 +105,7 @@ jobs:
         with:
           cuda: ${{ env.CUDA_VERSION }}
           method: local
-          linux-local-args: '["--toolkit", "--tmpdir=${{ runner.temp }}"]'
+          linux-local-args: '["--toolkit", "--tmpdir=/var/tmp/cuda-runfile"]'
           use-github-cache: false
           log-file-suffix: "${{ matrix.arch }}.txt"
 
