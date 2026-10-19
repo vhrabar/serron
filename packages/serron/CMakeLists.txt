@@ -34,18 +34,20 @@ endif()
 option(SERRON_CUDA "Build the CUDA backend (requires nvcc)" ${_serron_cuda_default})
 
 if(SERRON_CUDA)
+    if(WIN32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(ARM64|arm64|aarch64)$")
+        set(_serron_cuda_archs 89-real 100-real 120-real 120-virtual)
+    else()
+        set(_serron_cuda_archs 75-real 80-real 86-real 89-real 90-real 100-real 120-real 120-virtual)
+    endif()
+    if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES AND NOT DEFINED ENV{CUDAARCHS})
+        set(CMAKE_CUDA_ARCHITECTURES ${_serron_cuda_archs})
+    endif()
+
     enable_language(CUDA)
     #  20 device
     set(CMAKE_CUDA_STANDARD 20)
     set(CMAKE_CUDA_STANDARD_REQUIRED ON)
     set(CMAKE_CUDA_SEPARABLE_COMPILATION OFF)
-
-    if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-        set(CMAKE_CUDA_ARCHITECTURES 75-real 80-real 86-real 89-real 90-real 100-real 120-real 120-virtual)
-    endif()
-    if(NOT DEFINED TORCH_CUDA_ARCH_LIST)
-        set(TORCH_CUDA_ARCH_LIST "7.5;8.0;8.6;8.9;9.0;10.0;12.0+PTX")
-    endif()
     message(STATUS "serron: building with CUDA backend (arch ${CMAKE_CUDA_ARCHITECTURES})")
 else()
     message(STATUS "serron: building C++ only (no CUDA backend)")
@@ -54,21 +56,22 @@ endif()
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 execute_process(
-        COMMAND ${Python_EXECUTABLE} -c "import torch; print(torch.utils.cmake_prefix_path)"
-        OUTPUT_VARIABLE TORCH_CMAKE_PREFIX
+        COMMAND ${Python_EXECUTABLE} -c "import pathlib, torch; print(pathlib.Path(torch.__file__).resolve().parent.as_posix())"
+        OUTPUT_VARIABLE TORCH_INSTALL_PREFIX
         OUTPUT_STRIP_TRAILING_WHITESPACE
 )
-list(APPEND CMAKE_PREFIX_PATH "${TORCH_CMAKE_PREFIX}")
-find_package(Torch REQUIRED CONFIG)
-
-
-execute_process(
-        COMMAND ${Python_EXECUTABLE} -c "import pathlib, torch; print(pathlib.Path(torch.__file__).resolve().parent / 'lib')"
-        OUTPUT_VARIABLE TORCH_LIB_DIR
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-)
+set(TORCH_LIB_DIR "${TORCH_INSTALL_PREFIX}/lib")
 if(NOT EXISTS "${TORCH_LIB_DIR}")
     message(FATAL_ERROR "Could not locate torch lib dir at: ${TORCH_LIB_DIR}")
+endif()
+
+set(TORCH_INCLUDE_DIRS
+        "${TORCH_INSTALL_PREFIX}/include"
+        "${TORCH_INSTALL_PREFIX}/include/torch/csrc/api/include")
+find_library(SERRON_TORCH_CPU_LIBRARY torch_cpu PATHS "${TORCH_LIB_DIR}" NO_DEFAULT_PATH REQUIRED)
+
+if(SERRON_CUDA)
+    find_package(CUDAToolkit REQUIRED)
 endif()
 
 execute_process(
@@ -109,10 +112,6 @@ else()
 endif()
 
 configure_file(cmake/_build_info.py.in "${CMAKE_CURRENT_BINARY_DIR}/_build_info.py" @ONLY)
-
-if(SERRON_CUDA)
-    find_package(CUDAToolkit REQUIRED)
-endif()
 
 # _C holds the op schemas and the CPU kernels and links only torch_cpu/c10, so it loads on CPU-only torch.
 # _C_cuda holds the CUDA kernels and is loaded on top of it only when torch has CUDA.
@@ -212,7 +211,11 @@ option(CUDA_SANITIZE "Build device code with -G for compute-sanitizer" OFF)
 
 
 foreach(_target IN LISTS _serron_compiled_targets)
+    # The nvcc flags torch's CMake config used to add to CMAKE_CUDA_FLAGS; the torch headers need relaxed constexpr.
     target_compile_options(${_target} PRIVATE
+            "$<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:SHELL:-Xcudafe --diag_suppress=cc_clobber_ignored,--diag_suppress=field_without_dll_interface,--diag_suppress=base_class_has_different_dll_interface,--diag_suppress=dll_interface_conflict_none_assumed,--diag_suppress=dll_interface_conflict_dllexport_assumed,--diag_suppress=bad_friend_decl>"
+            $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:--expt-relaxed-constexpr>
+            $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:--expt-extended-lambda>
             $<$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>:--threads=${SERRON_CUDA_NVCC_THREADS}>
             $<$<AND:$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>,$<CONFIG:Debug>>:-lineinfo>
             $<$<AND:$<COMPILE_LANG_AND_ID:CUDA,NVIDIA>,$<CONFIG:Debug>,$<BOOL:${CUDA_SANITIZE}>>:-G>
@@ -250,12 +253,13 @@ foreach(_target IN LISTS _serron_targets)
     endif()
 endforeach()
 
-target_link_libraries(_C PRIVATE "$<TARGET_LINKER_FILE:torch_cpu>")
+target_link_libraries(_C PRIVATE "${SERRON_TORCH_CPU_LIBRARY}")
 
 if(SERRON_CUDA)
     target_include_directories(_C_cuda PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
-    target_link_libraries(_C_cuda PRIVATE "$<TARGET_LINKER_FILE:torch_cpu>" ${CMAKE_DL_LIBS})
+    target_link_libraries(_C_cuda PRIVATE "${SERRON_TORCH_CPU_LIBRARY}" ${CMAKE_DL_LIBS})
 endif()
 
-install(TARGETS ${_serron_targets} LIBRARY DESTINATION serron)
+# On Windows the .dll is a RUNTIME artifact, which would otherwise land in bin/ outside the package.
+install(TARGETS ${_serron_targets} LIBRARY DESTINATION serron RUNTIME DESTINATION serron)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/_build_info.py" DESTINATION serron)

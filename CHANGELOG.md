@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Windows on ARM (`win_arm64`) wheels, built with CUDA 13.4 against NVIDIA's `+cu134` torch from
+    `https://pypi.nvidia.com/nvtorch_oot/`. Builds on Windows on ARM default to the
+    `89-real;100-real;120-real;120-virtual` arch list.
+
+### Changed
+
+- The build no longer calls `find_package(Torch)`. It only needs torch's headers and `torch_cpu`, and torch's
+    CMake config runs the legacy FindCUDA, which looks for `cudart` under `lib/x64` only and so fails against an
+    arm64 CUDA toolkit.
+
 ## [0.5.0] - 2026-10-11
 
 ### Fixed
