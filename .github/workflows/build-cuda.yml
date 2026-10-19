@@ -74,9 +74,10 @@ jobs:
             echo "CUDAHOSTCXX=g++-${{ matrix.gcc }}"
           } >> "$GITHUB_ENV"
 
+      # TODO: return to Jimver/cudatollkit once the PR is merged to teh upstream
       - name: Install CUDA toolkit
         id: cuda-toolkit
-        uses: Jimver/cuda-toolkit@v0.2.36
+        uses: vhrabar/cuda-toolkit@temp
         with:
           cuda: ${{ matrix.cuda }}
           method: local
@@ -149,8 +150,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      # TODO: return to Jimver/cudatollkit once the PR is merged to teh upstream
       - name: Install CUDA toolkit
-        uses: Jimver/cuda-toolkit@v0.2.36
+        uses: vhrabar/cuda-toolkit@temp
         with:
           cuda: ${{ matrix.cuda }}
           method: local
@@ -176,7 +178,7 @@ jobs:
           CMAKE_BUILD_PARALLEL_LEVEL: "2"
 
   cuda-build-windows-arm64:
-    name: cuda-build-windows-arm64 (CUDA 13.4.3, cu134-win-arm64)
+    name: cuda-build-windows-arm64 (CUDA 13.4, cu134-win-arm64)
     runs-on: windows-11-arm
     steps:
       - name: Checkout repository
@@ -184,10 +186,11 @@ jobs:
 
       # TODO: return to Jimver/cudatollkit once the PR is merged to teh upstream
       - name: Install CUDA toolkit
-        uses: vhrabar/cuda-toolkit@adacd049c4b6e8a95fbdd89a059035552ec88913
+        uses: vhrabar/cuda-toolkit@temp
         with:
-          cuda: "13.4.3"
+          cuda: "13.4"
           method: local
+          sub-packages: '["nvcc", "nvvm", "crt", "cudart", "thrust", "visual_studio_integration"]'
           use-github-cache: false
           log-file-suffix: "windows-arm64.txt"
 
