@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Windows on ARM (`win_arm64`) wheels, built with CUDA 13.4.3 against NVIDIA's `+cu134` torch from
+    `https://pypi.nvidia.com/nvtorch_oot/`. Builds on Windows on ARM default to the
+    `89-real;100-real;120-real;120-virtual` arch list.
+
+### Fixed
+
+- The default CUDA arch list is set before `enable_language(CUDA)`. Set after it, the list was skipped because
+    CMake had already filled `CMAKE_CUDA_ARCHITECTURES` with nvcc's default, so a source build could compile
+    for `sm_75` only. `-DCMAKE_CUDA_ARCHITECTURES` and the `CUDAARCHS` environment variable still override it.
+
 ## [0.5.0] - 2026-10-11
 
 ### Fixed
