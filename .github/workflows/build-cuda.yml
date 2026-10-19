@@ -174,3 +174,37 @@ jobs:
         run: uv build --package serron --wheel --no-build-isolation
         env:
           CMAKE_BUILD_PARALLEL_LEVEL: "2"
+
+  cuda-build-windows-arm64:
+    name: cuda-build-windows-arm64 (CUDA 13.4.3, cu134-win-arm64)
+    runs-on: windows-11-arm
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # TODO: return to Jimver/cudatollkit once the PR is merged to teh upstream
+      - name: Install CUDA toolkit
+        uses: vhrabar/cuda-toolkit@adacd049c4b6e8a95fbdd89a059035552ec88913
+        with:
+          cuda: "13.4.3"
+          method: local
+          use-github-cache: false
+          log-file-suffix: "windows-arm64.txt"
+
+      - name: Verify toolchain
+        run: nvcc --version
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.14"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install build dependencies
+        run: uv sync --no-install-workspace --no-default-groups --group dev --group cu134-win-arm64
+
+      - name: Compile CUDA extension
+        run: uv build --package serron --wheel --no-build-isolation
+        env:
+          CMAKE_BUILD_PARALLEL_LEVEL: "2"
