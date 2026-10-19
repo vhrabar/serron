@@ -2,7 +2,7 @@
 name = "serron-workspace"
 version = "0"
 dependencies = [
-    "kornia>=0.8.3",
+    "kornia>=0.8.3; sys_platform != 'win32' or platform_machine != 'ARM64'",
     "scikit-build-core==1.1.1",
     "scipy-stubs~=1.18.1.1",
     "serron",
@@ -24,6 +24,11 @@ name = "pytorch-cu132"
 url = "https://download.pytorch.org/whl/cu132"
 explicit = true
 
+[[tool.uv.index]]
+name = "nvidia-cu134-win-arm64"
+url = "https://pypi.nvidia.com/nvtorch_oot/"
+explicit = true
+
 [tool.uv.workspace]
 members = ["packages/*"]
 
@@ -35,6 +40,7 @@ torch = [
     { index = "pytorch-cu129", group = "cu129" },
     { index = "pytorch-cu132", group = "cu132" },
     { index = "pytorch-cu132", group = "cu132-newest" },
+    { index = "nvidia-cu134-win-arm64", group = "cu134-win-arm64", marker = "sys_platform == 'win32' and platform_machine == 'ARM64'" },
 ]
 
 [dependency-groups]
@@ -52,6 +58,7 @@ cu129 = ["torch==2.13.*"]
 cu132 = ["torch==2.13.*"]
 cpu-newest = ["torch>=2.14"]
 cu132-newest = ["torch>=2.14"]
+cu134-win-arm64 = ["torch>=2.14"]
 
 [tool.uv]
 no-build-isolation-package = ["serron"]
@@ -63,6 +70,7 @@ conflicts = [
         { group = "cu132" },
         { group = "cpu-newest" },
         { group = "cu132-newest" },
+        { group = "cu134-win-arm64" },
     ],
 ]
 
