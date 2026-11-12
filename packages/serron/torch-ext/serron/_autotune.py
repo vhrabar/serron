@@ -28,7 +28,7 @@ __all__ = [
     "DEFAULT_KS",
     "DEFAULT_SHAPE_KS",
     "HYSTERESIS",
-    "MIN_TUNED_ELEMENTS",
+    "LAUNCH_BOUND_ELEMENTS",
     "apply_thresholds",
     "autotune",
     "calibrate",
@@ -53,10 +53,10 @@ DEFAULT_DTYPES = (torch.float32, torch.float16, torch.bfloat16)
 DEFAULT_SHAPE_KS = (3, 5, 7, 11, 15, 21, 31)
 """Square window lengths :func:`autotune` measures unless told otherwise."""
 
-MIN_TUNED_ELEMENTS = 1 << 16
+LAUNCH_BOUND_ELEMENTS = 1 << 16
 """
-Smallest ``N*C*H*W`` worth tuning. Below it a call is bound by launch latency, every algorithm costs about the same,
-and a measurement would be noise.
+Largest ``N*C*H*W`` that is not worth tuning, so ``1x1x256x256`` is left alone. Up to it a call is bound by launch
+latency, every algorithm costs about the same, and a measurement would be noise.
 """
 
 _SHAPE_PREFIX = "shape:"
@@ -76,9 +76,36 @@ def _runner(x: torch.Tensor, grad: torch.Tensor, kernel: torch.Tensor, backward:
     return run
 
 
+SCREEN_REPS = 2
+"""Repetitions of the quick first pass in :func:`_time_candidates`."""
+
+SCREEN_SLOWDOWN = 2.0
+"""A candidate this many times slower than the best in the quick pass is not timed further."""
+
+
 def _time_candidates(run: Callable[[Algorithm], object], candidates: Sequence[Algorithm], reps: int) -> dict[Algorithm, float]:
-    """Median time of ``run`` for each candidate."""
-    return {algo: time_ms(lambda algo=algo: run(algo), reps) for algo in candidates}
+    """
+    Median time of ``run`` for each candidate.
+
+    Most of the cost of tuning is spent on candidates that are far from winning, so every candidate is first timed
+    for :data:`SCREEN_REPS` repetitions, and only those within :data:`SCREEN_SLOWDOWN` of the best get the full
+    ``reps``. Nothing is ruled out in advance, only measured out. A candidate dropped after the quick pass keeps its
+    quick time, which is a fair stand-in because it is far from the best anyway.
+
+    :param run: runs one candidate once.
+    :param candidates: algorithms to time.
+    :param reps: repetitions for the candidates that survive the quick pass.
+    :returns: a time for every candidate.
+    """
+    if reps <= SCREEN_REPS or len(candidates) < 2:
+        return {algo: time_ms(lambda algo=algo: run(algo), reps) for algo in candidates}
+
+    times = {algo: time_ms(lambda algo=algo: run(algo), SCREEN_REPS) for algo in candidates}
+    best = min(times.values())
+    for algo in candidates:
+        if times[algo] <= best * SCREEN_SLOWDOWN:
+            times[algo] = time_ms(lambda algo=algo: run(algo), reps, warmup=0)
+    return times
 
 
 def _dtype_name(dtype: torch.dtype) -> str:
@@ -412,7 +439,7 @@ def autotune(
     Every combination of shape, square window length, dtype and structuring-element kind is timed, forward and
     backward, on scratch tensors. The winners apply to this process at once and are saved next to the
     :func:`calibrate` thresholds, so later processes load them on their first CUDA op. A winner is only used where it
-    beats the heuristic by :data:`HYSTERESIS`. Shapes smaller than :data:`MIN_TUNED_ELEMENTS` elements are skipped:
+    beats the heuristic by :data:`HYSTERESIS`. Shapes of up to :data:`LAUNCH_BOUND_ELEMENTS` elements are skipped:
     they are bound by launch latency and left to the heuristic.
 
     :param shapes: ``(N, C, H, W)`` inputs to tune for. A tuning also serves shapes within a factor of two in ``N*C*H*W``.
@@ -437,7 +464,7 @@ def autotune(
     fresh: dict[str, int] = {}
     for shape, dtype, k, is_flat, backward in itertools.product(shapes, dtypes, ks, flat, (False, True)):
         numel = math.prod(shape)
-        if numel < MIN_TUNED_ELEMENTS:
+        if numel <= LAUNCH_BOUND_ELEMENTS:
             continue
         key = shape_key(dtype, backward=backward, flat=is_flat, k_h=k, k_w=k, numel=numel)
         known = _shape_table.get(f"{index}|{key}")
@@ -471,7 +498,7 @@ def select_algorithm(input_: torch.Tensor, kernel: torch.Tensor, flat: bool, *, 
 
     With ``SERRON_AUTOTUNE=1`` a problem not seen before is tuned here, on the calling thread, the first time it
     occurs: that call pays for timing every candidate on scratch tensors. Nothing is tuned during CUDA graph
-    capture, for sizes under :data:`MIN_TUNED_ELEMENTS`, or if tuning fails; those use the heuristic.
+    capture, for sizes up to :data:`LAUNCH_BOUND_ELEMENTS`, or if tuning fails; those use the heuristic.
 
     :param input_: input of the call.
     :param kernel: structuring element of the call.
@@ -479,7 +506,7 @@ def select_algorithm(input_: torch.Tensor, kernel: torch.Tensor, flat: bool, *, 
     :param backward: whether the call is the backward pass.
     :returns: an :class:`Algorithm` value, ``0`` to let the library choose.
     """
-    if not (_shape_table or _lazy) or not input_.is_cuda:
+    if not (_shape_table or _lazy) or not input_.is_cuda or input_.numel() <= LAUNCH_BOUND_ELEMENTS:
         return 0
     index = input_.device.index
     if index is None:
@@ -500,9 +527,6 @@ def select_algorithm(input_: torch.Tensor, kernel: torch.Tensor, flat: bool, *, 
 
 
 def _tune_lazily(full: str, key: str, index: int, input_: torch.Tensor, kernel: torch.Tensor, flat: bool, backward: bool) -> int:
-    if input_.numel() < MIN_TUNED_ELEMENTS:
-        _shape_table[full] = 0  # in memory only: a size this small is never worth looking at again
-        return 0
     if torch.cuda.is_current_stream_capturing():
         return 0
     with _tune_lock:

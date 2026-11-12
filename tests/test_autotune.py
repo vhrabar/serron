@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 import multiprocessing
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from math import prod as math_prod
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,6 +18,7 @@ import torch
 import serron
 import serron.autograd as serron_autograd
 from serron import _autotune as autotune
+from serron import _flatness
 from serron import _tuning_cache as cache
 from serron._algorithms import (
     DeviceFingerprint,
@@ -27,7 +28,7 @@ from serron._algorithms import (
 )
 from serron._autotune import (
     HYSTERESIS,
-    MIN_TUNED_ELEMENTS,
+    LAUNCH_BOUND_ELEMENTS,
     apply_thresholds,
     calibrate,
     crossover,
@@ -768,5 +769,105 @@ def test_autotune_off_ignores_saved_problem_winners(fresh_state: None, monkeypat
     assert not autotune._shape_table
 
 
-def test_the_minimum_tuned_size_is_a_power_of_two_floor() -> None:
-    assert MIN_TUNED_ELEMENTS == 1 << 16
+@requires_cuda
+def test_the_issues_launch_bound_example_is_skipped_and_one_row_more_is_not(
+    lazy: list[dict[str, object]], fake_times: dict[Algorithm, float]
+) -> None:
+    edge = (1, 1, 256, 256)
+    just_over = (1, 1, 257, 256)
+    assert math_prod(edge) == LAUNCH_BOUND_ELEMENTS < math_prod(just_over)
+    kernel = torch.zeros(5, 5, device="cuda")
+
+    serron.erosion(torch.randn(edge, device="cuda"), kernel)
+    assert not lazy, "1x1x256x256 is launch-bound"
+    assert autotune_shapes([edge], ks=[5], flat=[True]) == {}
+
+    serron.erosion(torch.randn(just_over, device="cuda"), kernel)
+    assert len(lazy) == 1
+    assert len(autotune_shapes([just_over], ks=[5], flat=[True])) == 2
+
+
+@requires_cuda
+@pytest.mark.parametrize("tuned", [False, True], ids=["cold_table", "tuned_entry"])
+def test_a_captured_erosion_replays_the_eager_result(lazy: list[dict[str, object]], tuned: bool) -> None:
+    x = torch.randn(_BIG, device="cuda")
+    kernel = _flatness.mark(torch.zeros(3, 21, 21, device="cuda"), True)  # a known flatness needs no read-back
+    ensure_loaded(x.device)  # lazy tuning is now armed, as it is after any earlier call
+    if tuned:
+        key = shape_key(x.dtype, backward=False, flat=True, k_h=21, k_w=21, numel=x.numel())
+        autotune._shape_table[f"0|{key}"] = int(Algorithm.ELEMENT)
+    expected = serron.erosion(x, kernel)  # warms the kernels, and tunes the cold problem outside the capture
+    lazy.clear()
+    if not tuned:
+        autotune._shape_table.clear()  # cold again, so the capture below is what meets an unseen problem
+
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        captured = serron.erosion(x, kernel)
+    graph.replay()
+    torch.cuda.synchronize()
+
+    assert not lazy, "nothing is timed inside a capture"
+    assert torch.equal(captured, expected)
+
+
+# --------------------------------------------------------------------------- #
+# Screening candidates
+# --------------------------------------------------------------------------- #
+
+
+def _fake_timer(
+    monkeypatch: pytest.MonkeyPatch, speeds: dict[Algorithm, float]
+) -> tuple[Callable[[Algorithm], None], list[tuple[Algorithm, int]]]:
+    """
+    Replace ``time_ms`` so a candidate takes ``speeds[algo]``.
+
+    :returns: a runner to hand to ``_time_candidates``, and the log of ``(algorithm, repetitions)`` asked for.
+    """
+    calls: list[tuple[Algorithm, int]] = []
+    current: list[Algorithm] = []
+
+    def run(algo: Algorithm) -> None:
+        current[:] = [algo]
+
+    def fake(fn: Callable[[], object], reps: int = 30, warmup: int = 1) -> float:
+        fn()
+        calls.append((current[0], reps))
+        return speeds[current[0]]
+
+    monkeypatch.setattr(autotune, "time_ms", fake)
+    return run, calls
+
+
+def test_screening_gives_full_repetitions_only_to_candidates_near_the_best(monkeypatch: pytest.MonkeyPatch) -> None:
+    speeds = {Algorithm.ELEMENT: 9.0, Algorithm.TILED: 1.1, Algorithm.SEPARABLE: 1.0}
+    run, calls = _fake_timer(monkeypatch, speeds)
+
+    times = autotune._time_candidates(run, list(speeds), reps=20)
+
+    assert times == speeds, "every candidate gets a time, a dropped one keeps its quick time"
+    full = {algo for algo, reps in calls if reps == 20}
+    quick = [algo for algo, reps in calls if reps == autotune.SCREEN_REPS]
+    assert full == {Algorithm.TILED, Algorithm.SEPARABLE}
+    assert sorted(quick, key=int) == [Algorithm.ELEMENT, Algorithm.TILED, Algorithm.SEPARABLE]
+
+
+def test_screening_keeps_a_candidate_at_the_slowdown_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    speeds = {Algorithm.TILED: 2.0 * autotune.SCREEN_SLOWDOWN / 2, Algorithm.SEPARABLE: 1.0}
+    run, calls = _fake_timer(monkeypatch, speeds)
+
+    autotune._time_candidates(run, list(speeds), reps=20)
+
+    assert {algo for algo, reps in calls if reps == 20} == set(speeds)
+
+
+def test_screening_is_skipped_when_there_is_nothing_to_save(monkeypatch: pytest.MonkeyPatch) -> None:
+    speeds = {Algorithm.ELEMENT: 9.0, Algorithm.TILED: 1.0}
+
+    run, calls = _fake_timer(monkeypatch, speeds)
+    autotune._time_candidates(run, list(speeds), reps=autotune.SCREEN_REPS)
+    assert {reps for _, reps in calls} == {autotune.SCREEN_REPS}, "too few reps to be worth a second pass"
+
+    calls.clear()
+    autotune._time_candidates(run, [Algorithm.TILED], reps=20)
+    assert calls == [(Algorithm.TILED, 20)], "a lone candidate has nothing to be screened against"

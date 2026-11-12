@@ -14,7 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
     and `SERRON_SEPARABLE_MIN_K` still overrides everything (#66).
 - `serron.autotune(shapes=[...])` times every feasible algorithm on given input shapes and remembers the winner per
     problem, used only where it beats the built-in choice by 5%. `SERRON_AUTOTUNE=1` does the same lazily, the first
-    time a problem is seen; it is off by default. Nothing is tuned during CUDA graph capture or for inputs under 65536
+    time a problem is seen; it is off by default. Nothing is tuned during CUDA graph capture or for inputs of up to 65536
     elements (#66).
 - The compiled ops take an `algo` argument to force the element-wise, tiled or separable kernels, and raise when the
     forced one cannot run on the problem (#66).

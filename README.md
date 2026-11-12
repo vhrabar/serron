@@ -181,7 +181,7 @@ serron.autotune(shapes=[(8, 3, 512, 512), (16, 3, 1024, 1024)], ks=[7, 15, 31])
 
 Each combination of shape, window length, dtype and structuring-element kind is timed forward and backward on
 scratch tensors, so none of your tensors are touched. A winner replaces the built-in choice only where it is at least
-5% faster. A tuning also serves shapes within a factor of two in `N*C*H*W`, and inputs under 65536 elements are left
+5% faster. A tuning also serves shapes within a factor of two in `N*C*H*W`, and inputs of up to 65536 elements (`1x1x256x256`) are left
 to the built-in choice because they are bound by launch latency. Results are saved with the calibration and loaded on
 the first CUDA op of a later process. Nothing is ever tuned while a CUDA graph is being captured.
 
