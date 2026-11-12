@@ -8,7 +8,6 @@ import os
 import pathlib
 import re
 import sys
-
 import tomllib
 
 PKG_DIR = pathlib.Path(os.environ.get("PKG_DIR", "packages/serron"))

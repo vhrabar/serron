@@ -49,6 +49,7 @@ dev = [
     "pytest-benchmark",
     "ruff==0.17.3",
     "pyrefly",
+    "prek",
     "scikit-build-core",
     "cmake==4.4.4",
     "ninja",

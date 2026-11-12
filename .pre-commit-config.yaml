@@ -1,0 +1,127 @@
+minimum_prek_version: "0.2.0"
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
+default_stages: [pre-commit]
+exclude: ^(dist|cmake-build-debug|\.idea)/
+
+repos:
+  - repo: builtin
+    hooks:
+      # Whitespace and file hygiene. Licence texts are copied verbatim, and uv.lock is generated.
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+        exclude: ^(uv\.lock|(packages/serron/)?(LICENSE|THIRD_PARTY_NOTICES))$
+        stages: [pre-commit]
+      - id: end-of-file-fixer
+        exclude: ^(uv\.lock|(packages/serron/)?(LICENSE|THIRD_PARTY_NOTICES))$
+        stages: [pre-commit]
+      - id: mixed-line-ending
+        args: [--fix=lf]
+        exclude: ^(uv\.lock|(packages/serron/)?(LICENSE|THIRD_PARTY_NOTICES))$
+        stages: [pre-commit]
+      - id: check-case-conflict
+        stages: [pre-commit]
+      - id: check-merge-conflict
+        stages: [pre-commit]
+
+      # Syntax of the files CI and the build parse.
+      - id: check-yaml
+        stages: [pre-commit]
+      - id: check-toml
+        stages: [pre-commit]
+      - id: check-json
+        exclude: ^\.idea/
+        stages: [pre-commit]
+
+      # Things that should not be committed.
+      - id: check-added-large-files
+        args: [--maxkb=500]
+        stages: [pre-commit]
+      - id: detect-private-key
+        stages: [pre-commit]
+
+      # dev is where work lands and main is reached by pull request.
+      - id: no-commit-to-branch
+        args: [--branch, main]
+        stages: [pre-commit]
+
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: scripts/hooks/run uv run --no-sync ruff check --fix --exit-non-zero-on-fix
+        language: system
+        types_or: [python, pyi]
+
+      - id: ruff-format
+        name: ruff format
+        entry: scripts/hooks/run uv run --no-sync ruff format
+        language: system
+        types_or: [python, pyi]
+
+      # Whole-project check. It reads its paths from [tool.pyrefly].
+      - id: pyrefly
+        name: pyrefly
+        entry: scripts/hooks/run scripts/lint.sh pyrefly
+        language: system
+        types_or: [python, pyi]
+        pass_filenames: false
+
+      - id: clang-format
+        name: clang-format (pinned)
+        entry: scripts/hooks/clang_format.sh
+        language: system
+        files: \.(cpp|cc|cxx|h|hpp|cu|cuh)$
+
+      - id: license-copies
+        name: packaged licence copies match
+        entry: scripts/hooks/run scripts/lint.sh license-copies
+        language: system
+        files: ^(packages/serron/)?(LICENSE|THIRD_PARTY_NOTICES)$
+        pass_filenames: false
+
+      - id: torch-floor
+        name: torch floor is consistent
+        entry: scripts/hooks/run scripts/lint.sh torch-floor
+        language: system
+        files: ^(pyproject\.toml|packages/serron/(pyproject\.toml|CMakeLists\.txt)|scripts/(check_torch_floor|torch_req)\.py)$
+        pass_filenames: false
+
+      # CI parses this with kacl-cli and the release workflows rewrite it, so it must stay in keep-a-changelog form.
+      - id: changelog
+        name: CHANGELOG.md is keep-a-changelog
+        entry: scripts/hooks/run uvx --from python-kacl==0.7.3 kacl-cli verify
+        language: system
+        files: ^CHANGELOG\.md$
+        pass_filenames: false
+        stages: [pre-commit, pre-push]
+
+      - id: uv-lock
+        name: uv.lock is up to date
+        entry: scripts/hooks/run uv lock --check --offline
+        language: system
+        files: ^(pyproject\.toml|packages/serron/pyproject\.toml|uv\.lock)$
+        pass_filenames: false
+
+      - id: commit-message
+        name: conventional commit subject
+        entry: scripts/hooks/commit_msg.py
+        language: system
+        stages: [commit-msg]
+
+      # Everything the Lint and Static Checks workflow runs, on the whole repo.
+      - id: ci-lint
+        name: lint as CI runs it
+        entry: scripts/hooks/run scripts/lint.sh
+        language: system
+        always_run: true
+        pass_filenames: false
+        stages: [pre-push]
+
+      # Runs the CUDA tests too when a GPU is present. The first import rebuilds the extension if C++ changed.
+      - id: pytest
+        name: pytest
+        entry: scripts/hooks/run uv run --no-sync pytest tests/ -q -x
+        language: system
+        always_run: true
+        pass_filenames: false
+        stages: [pre-push]
