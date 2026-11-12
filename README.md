@@ -168,7 +168,30 @@ serron.calibrate()  # a few seconds, once per GPU
 The result applies to the running process and is saved under `$SERRON_CACHE_DIR` (default `~/.cache/serron`),
 keyed by GPU, CUDA version and serron version. Later processes load it on their first CUDA op, so `calibrate()`
 only has to run once. Pass `force=True` to measure again, or `dtypes=[...]` to choose the element types.
-`SERRON_AUTOTUNE=0` skips loading a saved calibration, and `SERRON_SEPARABLE_MIN_K` still overrides everything.
+`SERRON_SEPARABLE_MIN_K` still overrides everything.
+
+### Tuning for shapes
+
+`calibrate()` moves one threshold. To time every algorithm on the problems you actually run, warm them up ahead of
+time:
+
+```python
+serron.autotune(shapes=[(8, 3, 512, 512), (16, 3, 1024, 1024)], ks=[7, 15, 31])
+```
+
+Each combination of shape, window length, dtype and structuring-element kind is timed forward and backward on
+scratch tensors, so none of your tensors are touched. A winner replaces the built-in choice only where it is at least
+5% faster. A tuning also serves shapes within a factor of two in `N*C*H*W`, and inputs under 65536 elements are left
+to the built-in choice because they are bound by launch latency. Results are saved with the calibration and loaded on
+the first CUDA op of a later process. Nothing is ever tuned while a CUDA graph is being captured.
+
+`SERRON_AUTOTUNE` controls this:
+
+| Value          | Effect                                                                                          |
+|----------------|-------------------------------------------------------------------------------------------------|
+| unset          | Load saved results; never tune on its own                                                       |
+| `1`            | Also tune a problem the first time it is seen. That one call pays for it (about 0.2–0.6 s)      |
+| `0`            | Ignore saved results and use the built-in choice                                                |
 
 ### The separable path
 
