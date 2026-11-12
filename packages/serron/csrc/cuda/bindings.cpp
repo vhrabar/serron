@@ -10,4 +10,8 @@ TORCH_LIBRARY_IMPL_EXPAND(TORCH_EXTENSION_NAME, CUDA, ops) {
     ops.impl("dilate", TORCH_BOX(&serron::dilate));
     ops.impl("erode_backward", TORCH_BOX(&serron::erode_backward));
     ops.impl("dilate_backward", TORCH_BOX(&serron::dilate_backward));
+    ops.impl("feasible_algos", TORCH_BOX(&serron::feasible_algos));
+    ops.impl("heuristic_algo", TORCH_BOX(&serron::heuristic_algo));
+    ops.impl("set_separable_min_k", TORCH_BOX(&serron::set_separable_min_k_op));
+    ops.impl("get_separable_min_k", TORCH_BOX(&serron::get_separable_min_k_op));
 }

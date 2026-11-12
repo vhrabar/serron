@@ -6,6 +6,7 @@
 #include <cuda/morphology/enums.h>
 #include <cuda/morphology/kernel_tables.h>
 #include <cuda/morphology/separable.h>
+#include <cuda/morphology/thresholds.h>
 #include <cuda/utils/border_mode.h>
 #include <cuda/utils/declarations.h>
 #include <cuda/utils/driver.h>
@@ -209,8 +210,10 @@ Tensor morphology_impl(const Tensor& input, const Tensor& kernel, int64_t border
 
     THO_DISPATCH_V2(
         input_c.scalar_type(), "serron_morphology", AT_WRAP([&] {
-            const Algorithm algorithm =
-                resolve_algorithm(requested, is_flat, kH, kW, sizeof(scalar_t), sizeof(scalar_t), smem_budget(), name);
+            const AlgorithmProblem problem = make_problem<scalar_t>(
+                kH, kW, is_flat, smem_budget(),
+                separable_min_k(input_c.get_device_index(), input_c.scalar_type(), false), false);
+            const Algorithm algorithm = resolve_algorithm(requested, problem, name);
             Tensor scratch;
             if (algorithm == Algorithm::kSeparable) {
                 scratch = torch::stable::empty_like(input_c);

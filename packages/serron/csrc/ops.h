@@ -159,6 +159,36 @@ std::tuple<Tensor, Tensor> dilate_backward_cpu(const Tensor& grad_output, const 
                                                bool need_kernel_grad = true,
                                                int64_t algo = static_cast<int64_t>(Algorithm::kAuto));
 
+/**
+ * Bit mask of the algorithms (@ref Algorithm) that can run a call, with bit i set for algorithm i. Auto is never set.
+ *
+ * @param input     CUDA tensor of the input to the call; its device and dtype are what count.
+ * @param kernel    CUDA structuring element of the call.
+ * @param flat      Whether @p kernel is flat. Pass @c std::nullopt to have the operator check, which reads back
+ * from the device and synchronises.
+ * @param backward  Whether the call is the backward pass.
+ */
+int64_t feasible_algos(const Tensor& input, const Tensor& kernel, const std::optional<bool>& flat, bool backward);
+
+/**
+ * The algorithm (@ref Algorithm) the library picks for a call when asked for auto. Arguments as in @ref
+ * feasible_algos.
+ */
+int64_t heuristic_algo(const Tensor& input, const Tensor& kernel, const std::optional<bool>& flat, bool backward);
+
+/**
+ * Sets the window length from which the separable path is preferred for the device and dtype of @p like.
+ *
+ * @param like      CUDA tensor with the device and dtype to set it for.
+ * @param backward  Whether it is for the backward pass.
+ * @param min_k     New window length, or <= 0 to restore the default.
+ * @return          The threshold in effect afterwards, which SERRON_SEPARABLE_MIN_K may still override.
+ */
+int64_t set_separable_min_k_op(const Tensor& like, bool backward, int64_t min_k);
+
+/// The window length from which the separable path is preferred for the device and dtype of @p like.
+int64_t get_separable_min_k_op(const Tensor& like, bool backward);
+
 } // namespace serron
 
 #endif // SERRON_OPS_H

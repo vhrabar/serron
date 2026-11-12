@@ -11,6 +11,12 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
             "bool need_kernel_grad=True, int algo=0) -> (Tensor, Tensor)");
     ops.def("dilate_backward(Tensor grad_output, Tensor input, Tensor kernel, int border, bool? flat=None, "
             "bool need_kernel_grad=True, int algo=0) -> (Tensor, Tensor)");
+
+    // Algorithm selection, for the autotuner. CUDA only.
+    ops.def("feasible_algos(Tensor input, Tensor kernel, bool? flat=None, bool backward=False) -> int");
+    ops.def("heuristic_algo(Tensor input, Tensor kernel, bool? flat=None, bool backward=False) -> int");
+    ops.def("set_separable_min_k(Tensor like, bool backward, int min_k) -> int");
+    ops.def("get_separable_min_k(Tensor like, bool backward) -> int");
 }
 
 // CPU implementation

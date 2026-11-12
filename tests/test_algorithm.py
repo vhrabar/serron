@@ -4,10 +4,22 @@ Forcing the algorithm a compiled op runs through its ``algo`` argument.
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+
 import pytest
 import torch
 
 import serron
+from serron._algorithms import (
+    device_fingerprint,
+    feasible_algorithms,
+    get_separable_min_k,
+    heuristic_algorithm,
+    set_separable_min_k,
+)
+from serron._timing import time_ms
 from serron.autograd import _DilateFunction, _ErodeFunction, ops
 from serron.enums import Algorithm
 from tests.conftest import flat_se, make_image, requires_cuda
@@ -91,3 +103,113 @@ def test_cpu_only_takes_auto() -> None:
     assert torch.equal(ops.erode(x, kernel, _BORDER, True, int(Algorithm.AUTO)), serron.functional.erosion(x, kernel))
     with pytest.raises(RuntimeError, match="algo must be auto"):
         ops.erode(x, kernel, _BORDER, True, int(Algorithm.TILED))
+
+
+# --------------------------------------------------------------------------- #
+# Selection queries
+# --------------------------------------------------------------------------- #
+
+
+@requires_cuda
+def test_feasible_algorithms_for_flat_se() -> None:
+    x = torch.zeros(1, 3, 32, 32, device="cuda")
+    kernel = torch.zeros(3, 5, 5, device="cuda")
+
+    assert feasible_algorithms(x, kernel) == (Algorithm.ELEMENT, Algorithm.TILED, Algorithm.SEPARABLE)
+    assert feasible_algorithms(x, kernel, backward=True) == (Algorithm.ELEMENT, Algorithm.TILED, Algorithm.SEPARABLE)
+
+
+@requires_cuda
+def test_feasible_algorithms_drop_separable_for_non_flat_se() -> None:
+    x = torch.zeros(1, 3, 32, 32, device="cuda")
+    kernel = torch.ones(3, 5, 5, device="cuda")
+
+    assert feasible_algorithms(x, kernel) == (Algorithm.ELEMENT, Algorithm.TILED)
+
+
+@requires_cuda
+def test_feasible_algorithms_drop_tiled_for_window_over_shared_memory() -> None:
+    x = torch.zeros(1, 1, 8, 8, device="cuda")
+    kernel = torch.zeros(1, 1001, 1001, device="cuda")
+
+    assert Algorithm.TILED not in feasible_algorithms(x, kernel)
+    assert Algorithm.ELEMENT in feasible_algorithms(x, kernel)
+
+
+@requires_cuda
+@pytest.mark.parametrize("backward", [False, True])
+def test_every_feasible_algorithm_runs(backward: bool, rng: torch.Generator) -> None:
+    x = make_image(rng, (1, 2, 48, 48), device=torch.device("cuda"))
+    kernel = flat_se(x.shape[1], 9, device=x.device, shared=False)
+
+    for algo in feasible_algorithms(x, kernel, backward=backward):
+        ops.erode(x, kernel, _BORDER, True, int(algo))
+
+
+@requires_cuda
+def test_heuristic_follows_window_length_and_flatness() -> None:
+    x = torch.zeros(1, 3, 64, 64, device="cuda")
+
+    assert heuristic_algorithm(x, torch.zeros(3, 3, 3, device="cuda")) == Algorithm.TILED
+    assert heuristic_algorithm(x, torch.zeros(3, _SEPARABLE_K, _SEPARABLE_K, device="cuda")) == Algorithm.SEPARABLE
+    assert heuristic_algorithm(x, torch.ones(3, _SEPARABLE_K, _SEPARABLE_K, device="cuda")) == Algorithm.TILED
+
+
+@requires_cuda
+def test_separable_threshold_is_per_dtype_and_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    if os.environ.get("SERRON_SEPARABLE_MIN_K"):
+        pytest.skip("SERRON_SEPARABLE_MIN_K overrides every threshold")
+    x = torch.zeros(1, 3, 64, 64, device="cuda")
+    half = x.half()
+    kernel = torch.zeros(3, 5, 5, device="cuda")
+    default = get_separable_min_k(x)
+
+    try:
+        assert set_separable_min_k(x, 5) == 5
+        assert heuristic_algorithm(x, kernel) == Algorithm.SEPARABLE
+        assert heuristic_algorithm(x, kernel, backward=True) == Algorithm.TILED, "the backward has its own threshold"
+        assert get_separable_min_k(half) == default, "other dtypes are untouched"
+
+        set_separable_min_k(x, 0)
+        assert get_separable_min_k(x) == default
+        assert heuristic_algorithm(x, kernel) == Algorithm.TILED
+    finally:
+        set_separable_min_k(x, 0)
+
+
+@requires_cuda
+def test_environment_override_beats_the_table() -> None:
+    code = (
+        "import torch\n"
+        "from serron._algorithms import get_separable_min_k, set_separable_min_k\n"
+        "x = torch.zeros(1, 1, 8, 8, device='cuda')\n"
+        "set_separable_min_k(x, 5)\n"
+        "print(get_separable_min_k(x))\n"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        check=True,
+        env={**os.environ, "SERRON_SEPARABLE_MIN_K": "7"},
+    )
+
+    assert out.stdout.strip().splitlines()[-1] == "7"
+
+
+@requires_cuda
+def test_device_fingerprint_names_what_a_result_depends_on() -> None:
+    fingerprint = device_fingerprint()
+
+    assert set(fingerprint) == {"name", "capability", "sm_count", "max_optin_smem", "cuda", "serron"}
+    assert fingerprint["sm_count"] > 0
+    assert fingerprint["max_optin_smem"] >= 48 * 1024
+
+
+@requires_cuda
+def test_time_ms_is_positive_and_rejects_no_reps() -> None:
+    x = torch.randn(256, 256, device="cuda")
+
+    assert time_ms(lambda: x @ x, reps=3) > 0
+    with pytest.raises(ValueError, match="reps"):
+        time_ms(lambda: x @ x, reps=0)

@@ -6,6 +6,7 @@
 #include <cuda/morphology/enums.h>
 #include <cuda/morphology/kernel_tables.h>
 #include <cuda/morphology/separable.h>
+#include <cuda/morphology/thresholds.h>
 #include <cuda/utils/border_mode.h>
 #include <cuda/utils/declarations.h>
 #include <cuda/utils/driver.h>
@@ -55,12 +56,6 @@ const BackwardKernels<scalar_t>& backward_kernels(MorphOp op);
         return table[static_cast<int>(op)];                                                                            \
     }
 SERRON_CUDA_FOR_EACH_DTYPE(SERRON_BACKWARD_TABLE)
-
-/// Bytes per element the separable backward stages in shared memory: a value and the index of the tap that produced it.
-template <typename scalar_t>
-constexpr size_t backward_line_elem_size() {
-    return sizeof(ArgTap<acc_type<scalar_t, true>>);
-}
 
 /**
  * Launches the separable backward: the row pass into @p row_best_val / @p row_best_dj,
@@ -221,9 +216,10 @@ std::tuple<Tensor, Tensor> morphology_backward_impl(const Tensor& grad_output, c
     const auto border_mode = static_cast<BorderMode>(border);
 
     THO_DISPATCH_V2(input_c.scalar_type(), "serron_morphology_backward", AT_WRAP([&] {
-                        const Algorithm algorithm =
-                            resolve_algorithm(requested, is_flat, kH, kW, sizeof(scalar_t),
-                                              backward_line_elem_size<scalar_t>(), smem_budget(), name);
+                        const AlgorithmProblem problem = make_problem<scalar_t>(
+                            kH, kW, is_flat, smem_budget(),
+                            separable_min_k(input_c.get_device_index(), input_c.scalar_type(), true), true);
+                        const Algorithm algorithm = resolve_algorithm(requested, problem, name);
                         const bool separable = algorithm == Algorithm::kSeparable;
                         Tensor row_best_val;
                         Tensor row_best_dj;
