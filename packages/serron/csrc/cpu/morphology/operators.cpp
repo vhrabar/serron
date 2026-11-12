@@ -220,7 +220,9 @@ void morphology_cpu_for(const MorphOp op, const scalar_t* input, const scalar_t*
  * or @p border is out of range.
  */
 Tensor morphology_impl(const Tensor& input, const Tensor& kernel, int64_t border, const std::optional<bool>& flat,
-                       MorphOp op, const char* name) {
+                       int64_t algo, MorphOp op, const char* name) {
+    SERRON_CHECK(parse_algorithm(algo, name) == Algorithm::kAuto, name,
+                 ": the CPU operators pick their own algorithm, algo must be auto");
     SERRON_CHECK(input.is_cpu(), name, ": input must be a CPU tensor");
     SERRON_CHECK(kernel.is_cpu(), name, ": kernel must be a CPU tensor");
     SERRON_CHECK(input.dim() == 4, name, ": input must be 4-D (N, C, H, W), got ", input.dim(), "-D");
@@ -289,8 +291,9 @@ Tensor morphology_impl(const Tensor& input, const Tensor& kernel, int64_t border
  * @param border        Boundary mode (@ref BorderMode) applied at the image edges.
  * @return              Eroded tensor, same shape and dtype as @p input.
  */
-Tensor erode_cpu(const Tensor& input, const Tensor& kernel, const int64_t border, const std::optional<bool>& flat) {
-    return morphology_impl(input, kernel, border, flat, MorphOp::kErode, "serron::erode");
+Tensor erode_cpu(const Tensor& input, const Tensor& kernel, const int64_t border, const std::optional<bool>& flat,
+                 const int64_t algo) {
+    return morphology_impl(input, kernel, border, flat, algo, MorphOp::kErode, "serron::erode");
 }
 
 /**
@@ -302,8 +305,9 @@ Tensor erode_cpu(const Tensor& input, const Tensor& kernel, const int64_t border
  * @param border        Boundary mode (@ref BorderMode) applied at the image edges.
  * @return              Dilated tensor, same shape and dtype as @p input.
  */
-Tensor dilate_cpu(const Tensor& input, const Tensor& kernel, const int64_t border, const std::optional<bool>& flat) {
-    return morphology_impl(input, kernel, border, flat, MorphOp::kDilate, "serron::dilate");
+Tensor dilate_cpu(const Tensor& input, const Tensor& kernel, const int64_t border, const std::optional<bool>& flat,
+                  const int64_t algo) {
+    return morphology_impl(input, kernel, border, flat, algo, MorphOp::kDilate, "serron::dilate");
 }
 
 } // namespace serron

@@ -1,6 +1,7 @@
 #ifndef SERRON_OPS_H
 #define SERRON_OPS_H
 
+#include <morph_algorithm.h>
 #include <torch/csrc/stable/tensor.h>
 
 #include <optional>
@@ -19,9 +20,12 @@ using torch::stable::Tensor;
  * @param border  Boundary mode (serron.enums.BorderMode encoding) at the image edges.
  * @param flat    Whether @p kernel is flat (all-zero). Pass @c std::nullopt to have the operator check,
  * which reads back from the device and synchronises.
+ * @param algo    Algorithm to run (serron.enums.Algorithm encoding); 0 lets the library choose. The CPU
+ * operators only take 0.
  * @return        Eroded tensor, same shape and dtype as @p input.
  */
-Tensor erode(const Tensor& input, const Tensor& kernel, int64_t border, const std::optional<bool>& flat = std::nullopt);
+Tensor erode(const Tensor& input, const Tensor& kernel, int64_t border, const std::optional<bool>& flat = std::nullopt,
+             int64_t algo = static_cast<int64_t>(Algorithm::kAuto));
 
 /**
  * Grayscale dilation (sliding maximum) of @p input by structuring element @p kernel.
@@ -31,10 +35,12 @@ Tensor erode(const Tensor& input, const Tensor& kernel, int64_t border, const st
  * @param border  Boundary mode (serron.enums.BorderMode encoding) at the image edges.
  * @param flat    Whether @p kernel is flat (all-zero). Pass @c std::nullopt to have the operator check,
  * which reads back from the device and synchronises.
+ * @param algo    Algorithm to run (serron.enums.Algorithm encoding); 0 lets the library choose. The CPU
+ * operators only take 0.
  * @return        Dilated tensor, same shape and dtype as @p input.
  */
-Tensor dilate(const Tensor& input, const Tensor& kernel, int64_t border,
-              const std::optional<bool>& flat = std::nullopt);
+Tensor dilate(const Tensor& input, const Tensor& kernel, int64_t border, const std::optional<bool>& flat = std::nullopt,
+              int64_t algo = static_cast<int64_t>(Algorithm::kAuto));
 
 /**
  * Grayscale erosion (sliding minimum) of @p input by structuring element @p kernel.
@@ -44,10 +50,12 @@ Tensor dilate(const Tensor& input, const Tensor& kernel, int64_t border,
  * @param border  Boundary mode (serron.enums.BorderMode encoding) at the image edges.
  * @param flat    Whether @p kernel is flat (all-zero). Pass @c std::nullopt to have the operator check,
  * which reads back from the device and synchronises.
+ * @param algo    Algorithm to run (serron.enums.Algorithm encoding); 0 lets the library choose. The CPU
+ * operators only take 0.
  * @return        Eroded tensor, same shape and dtype as @p input.
  */
 Tensor erode_cpu(const Tensor& input, const Tensor& kernel, int64_t border,
-                 const std::optional<bool>& flat = std::nullopt);
+                 const std::optional<bool>& flat = std::nullopt, int64_t algo = static_cast<int64_t>(Algorithm::kAuto));
 
 /**
  * Grayscale dilation (sliding maximum) of @p input by structuring element @p kernel.
@@ -57,10 +65,13 @@ Tensor erode_cpu(const Tensor& input, const Tensor& kernel, int64_t border,
  * @param border  Boundary mode (serron.enums.BorderMode encoding) at the image edges.
  * @param flat    Whether @p kernel is flat (all-zero). Pass @c std::nullopt to have the operator check,
  * which reads back from the device and synchronises.
+ * @param algo    Algorithm to run (serron.enums.Algorithm encoding); 0 lets the library choose. The CPU
+ * operators only take 0.
  * @return        Dilated tensor, same shape and dtype as @p input.
  */
 Tensor dilate_cpu(const Tensor& input, const Tensor& kernel, int64_t border,
-                  const std::optional<bool>& flat = std::nullopt);
+                  const std::optional<bool>& flat = std::nullopt,
+                  int64_t algo = static_cast<int64_t>(Algorithm::kAuto));
 
 /**
  * Backward pass of grayscale erosion.
@@ -76,11 +87,14 @@ Tensor dilate_cpu(const Tensor& input, const Tensor& kernel, int64_t border,
  * which reads back from the device and synchronises.
  * @param need_kernel_grad  Whether grad_kernel is wanted; when false its scatter is skipped and the
  * returned tensor stays zero.
+ * @param algo          Algorithm to run (serron.enums.Algorithm encoding); 0 lets the library choose. The CPU
+ * operators only take 0.
  * @return             Pair (grad_input, grad_kernel) matching the shapes of @p input and @p kernel.
  */
 std::tuple<Tensor, Tensor> erode_backward(const Tensor& grad_output, const Tensor& input, const Tensor& kernel,
                                           int64_t border, const std::optional<bool>& flat = std::nullopt,
-                                          bool need_kernel_grad = true);
+                                          bool need_kernel_grad = true,
+                                          int64_t algo = static_cast<int64_t>(Algorithm::kAuto));
 
 /**
  * Backward pass of grayscale dilation.
@@ -96,11 +110,14 @@ std::tuple<Tensor, Tensor> erode_backward(const Tensor& grad_output, const Tenso
  * which reads back from the device and synchronises.
  * @param need_kernel_grad  Whether grad_kernel is wanted; when false its scatter is skipped and the
  * returned tensor stays zero.
+ * @param algo          Algorithm to run (serron.enums.Algorithm encoding); 0 lets the library choose. The CPU
+ * operators only take 0.
  * @return             Pair (grad_input, grad_kernel) matching the shapes of @p input and @p kernel.
  */
 std::tuple<Tensor, Tensor> dilate_backward(const Tensor& grad_output, const Tensor& input, const Tensor& kernel,
                                            int64_t border, const std::optional<bool>& flat = std::nullopt,
-                                           bool need_kernel_grad = true);
+                                           bool need_kernel_grad = true,
+                                           int64_t algo = static_cast<int64_t>(Algorithm::kAuto));
 
 /**
  * Backward pass of grayscale erosion (CPU), mirroring @ref erode_backward.
@@ -113,11 +130,14 @@ std::tuple<Tensor, Tensor> dilate_backward(const Tensor& grad_output, const Tens
  * which reads back from the device and synchronises.
  * @param need_kernel_grad  Whether grad_kernel is wanted; when false its scatter is skipped and the
  * returned tensor stays zero.
+ * @param algo          Algorithm to run (serron.enums.Algorithm encoding); 0 lets the library choose. The CPU
+ * operators only take 0.
  * @return             Pair (grad_input, grad_kernel) matching the shapes of @p input and @p kernel.
  */
 std::tuple<Tensor, Tensor> erode_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& kernel,
                                               int64_t border, const std::optional<bool>& flat = std::nullopt,
-                                              bool need_kernel_grad = true);
+                                              bool need_kernel_grad = true,
+                                              int64_t algo = static_cast<int64_t>(Algorithm::kAuto));
 
 /**
  * Backward pass of grayscale dilation (CPU), mirroring @ref dilate_backward.
@@ -130,11 +150,14 @@ std::tuple<Tensor, Tensor> erode_backward_cpu(const Tensor& grad_output, const T
  * which reads back from the device and synchronises.
  * @param need_kernel_grad  Whether grad_kernel is wanted; when false its scatter is skipped and the
  * returned tensor stays zero.
+ * @param algo          Algorithm to run (serron.enums.Algorithm encoding); 0 lets the library choose. The CPU
+ * operators only take 0.
  * @return             Pair (grad_input, grad_kernel) matching the shapes of @p input and @p kernel.
  */
 std::tuple<Tensor, Tensor> dilate_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& kernel,
                                                int64_t border, const std::optional<bool>& flat = std::nullopt,
-                                               bool need_kernel_grad = true);
+                                               bool need_kernel_grad = true,
+                                               int64_t algo = static_cast<int64_t>(Algorithm::kAuto));
 
 } // namespace serron
 

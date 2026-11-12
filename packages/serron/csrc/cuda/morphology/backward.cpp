@@ -1,5 +1,6 @@
 #include "ops.h"
 
+#include <cuda/morphology/algorithm.h>
 #include <cuda/morphology/arg_tap.h>
 #include <cuda/morphology/entry_points.h>
 #include <cuda/morphology/enums.h>
@@ -16,6 +17,7 @@
 #include <backward_fatbin.h>
 #include <compat/acc_type.h>
 #include <compat/check.h>
+#include <morph_algorithm.h>
 #include <torch/csrc/stable/accelerator.h>
 #include <torch/csrc/stable/ops.h>
 #include <torch/headeronly/core/Dispatch_v2.h>
@@ -54,6 +56,12 @@ const BackwardKernels<scalar_t>& backward_kernels(MorphOp op);
     }
 SERRON_CUDA_FOR_EACH_DTYPE(SERRON_BACKWARD_TABLE)
 
+/// Bytes per element the separable backward stages in shared memory: a value and the index of the tap that produced it.
+template <typename scalar_t>
+constexpr size_t backward_line_elem_size() {
+    return sizeof(ArgTap<acc_type<scalar_t, true>>);
+}
+
 /**
  * Launches the separable backward: the row pass into @p row_best_val / @p row_best_dj,
  * then the column pass scattering into @p grad_input / @p grad_kernel. O(kH+kW) per
@@ -65,8 +73,7 @@ bool launch_morphology_backward_separable(const BackwardKernels<scalar_t>& kerne
                                           scalar_t* row_best_val, int32_t* row_best_dj, int64_t N, int64_t C, int64_t H,
                                           int64_t W, int64_t kH, int64_t kW, int64_t kernel_channel_stride,
                                           BorderMode border, bool need_kernel_grad, CUstream stream) {
-    using acc_t = acc_type<scalar_t, true>;
-    constexpr size_t kTap = sizeof(ArgTap<acc_t>);
+    constexpr size_t kTap = backward_line_elem_size<scalar_t>();
 
     const Dim3 block(LINE_TILE);
     const size_t budget = smem_budget();
@@ -97,47 +104,49 @@ bool launch_morphology_backward_separable(const BackwardKernels<scalar_t>& kerne
 }
 
 /**
- * Launch the morphology backward pass on @p stream. Uses the separable row+column
- * argreduce when @p use_separable was set by the caller (flat, axis-separable SE
- * at/above @ref separable_min_k); otherwise recomputes the winning tap directly, as
- * @ref morphology_backward_kernel.
+ * Launch the morphology backward pass on @p stream with @p algorithm, which must already be resolved (see @ref
+ * resolve_algorithm) and cannot be @ref Algorithm::kAuto. Separable runs the row+column argreduce; tiled and
+ * element-wise recompute the winning tap directly, as @ref morphology_backward_kernel.
+ *
+ * @param may_fall_back  Whether a launch whose shared-memory setup the driver rejects may fall back to the next
+ * algorithm down. Only the library's own choice may; a forced algorithm that cannot launch throws.
  */
 template <typename scalar_t>
 void launch_morphology_backward(const BackwardKernels<scalar_t>& kernels, const scalar_t* grad_output,
                                 const scalar_t* input, const scalar_t* kernel, scalar_t* grad_input,
-                                scalar_t* grad_kernel, scalar_t* row_best_val, int32_t* row_best_dj, bool use_separable,
-                                int64_t N, int64_t C, int64_t H, int64_t W, int64_t kH, int64_t kW,
-                                int64_t kernel_channel_stride, BorderMode border, bool need_kernel_grad,
-                                CUstream stream) {
-    using acc_t = acc_type<scalar_t, true>;
-
-    // One scan chunk is the smallest tile a line pass can stage. If even that overflows the
-    // budget, the kernels below take over no matter how separable the SE is.
+                                scalar_t* grad_kernel, scalar_t* row_best_val, int32_t* row_best_dj,
+                                Algorithm algorithm, bool may_fall_back, int64_t N, int64_t C, int64_t H, int64_t W,
+                                int64_t kH, int64_t kW, int64_t kernel_channel_stride, BorderMode border,
+                                bool need_kernel_grad, CUstream stream) {
     const size_t budget = smem_budget();
-    if (use_separable && line_smem_bytes(1, std::max(kH, kW), sizeof(ArgTap<acc_t>)) <= budget &&
-        launch_morphology_backward_separable<scalar_t>(kernels, input, grad_output, grad_input, grad_kernel,
-                                                       row_best_val, row_best_dj, N, C, H, W, kH, kW,
-                                                       kernel_channel_stride, border, need_kernel_grad, stream)) {
-        return;
+
+    if (algorithm == Algorithm::kSeparable) {
+        if (launch_morphology_backward_separable<scalar_t>(kernels, input, grad_output, grad_input, grad_kernel,
+                                                           row_best_val, row_best_dj, N, C, H, W, kH, kW,
+                                                           kernel_channel_stride, border, need_kernel_grad, stream)) {
+            return;
+        }
+        SERRON_CHECK(may_fall_back, "serron: could not configure shared memory for the separable kernels");
+        algorithm = tiled_feasible(kH, kW, sizeof(scalar_t), budget) ? Algorithm::kTiled : Algorithm::kElement;
     }
 
-    const int64_t tile_w = TILE_X + kW - 1;
-    const int64_t tile_h = TILE_Y + kH - 1;
-    const size_t smem = (static_cast<size_t>(tile_h * tile_w) + static_cast<size_t>(kH * kW)) * sizeof(scalar_t);
-
-    // Tile if it fits, element-wise otherwise
-    if (smem <= budget && configure_kernel_smem(kernels.tiled, smem)) {
-        constexpr Dim3 block(TILE_X, TILE_Y);
-        const Dim3 grid(static_cast<unsigned int>((W + TILE_X - 1) / TILE_X),
-                        static_cast<unsigned int>((H + TILE_Y - 1) / TILE_Y), static_cast<unsigned int>(N * C));
-        launch_kernel(kernels.tiled, grid, block, smem, stream, grad_output, input, kernel, grad_input, grad_kernel, C,
-                      H, W, kH, kW, kernel_channel_stride, border, need_kernel_grad);
-    } else {
-        const int64_t total = N * C * H * W;
-        const auto blocks = static_cast<unsigned int>((total + THREADS - 1) / THREADS);
-        launch_kernel(kernels.element, blocks, THREADS, 0, stream, grad_output, input, kernel, grad_input, grad_kernel,
-                      N, C, H, W, kH, kW, kernel_channel_stride, border, need_kernel_grad);
+    if (algorithm == Algorithm::kTiled) {
+        const size_t smem = tiled_smem_bytes(kH, kW, sizeof(scalar_t));
+        if (configure_kernel_smem(kernels.tiled, smem)) {
+            constexpr Dim3 block(TILE_X, TILE_Y);
+            const Dim3 grid(static_cast<unsigned int>((W + TILE_X - 1) / TILE_X),
+                            static_cast<unsigned int>((H + TILE_Y - 1) / TILE_Y), static_cast<unsigned int>(N * C));
+            launch_kernel(kernels.tiled, grid, block, smem, stream, grad_output, input, kernel, grad_input, grad_kernel,
+                          C, H, W, kH, kW, kernel_channel_stride, border, need_kernel_grad);
+            return;
+        }
+        SERRON_CHECK(may_fall_back, "serron: could not configure shared memory for the tiled kernels");
     }
+
+    const int64_t total = N * C * H * W;
+    const auto blocks = static_cast<unsigned int>((total + THREADS - 1) / THREADS);
+    launch_kernel(kernels.element, blocks, THREADS, 0, stream, grad_output, input, kernel, grad_input, grad_kernel, N,
+                  C, H, W, kH, kW, kernel_channel_stride, border, need_kernel_grad);
 }
 
 /**
@@ -148,6 +157,7 @@ void launch_morphology_backward(const BackwardKernels<scalar_t>& kernels, const 
  * @param kernel       Forward structuring element, CUDA tensor of shape (kH, kW) or (C, kH, kW); same dtype as @p
  * input.
  * @param border       Boundary mode (@ref BorderMode encoding) used in the forward pass.
+ * @param algo         Algorithm to run (@ref Algorithm encoding); auto lets the library choose.
  * @param op           Operation to differentiate (@ref MorphOp).
  * @param name         Qualified caller name used to prefix diagnostics.
  * @return             Pair (grad_input, grad_kernel) matching the shapes of @p input and @p kernel.
@@ -156,8 +166,8 @@ void launch_morphology_backward(const BackwardKernels<scalar_t>& kernels, const 
  */
 std::tuple<Tensor, Tensor> morphology_backward_impl(const Tensor& grad_output, const Tensor& input,
                                                     const Tensor& kernel, int64_t border,
-                                                    const std::optional<bool>& flat, bool need_kernel_grad, MorphOp op,
-                                                    const char* name) {
+                                                    const std::optional<bool>& flat, bool need_kernel_grad,
+                                                    int64_t algo, MorphOp op, const char* name) {
     SERRON_CHECK(grad_output.is_cuda(), name, ": grad_output must be a CUDA tensor");
     SERRON_CHECK(input.is_cuda(), name, ": input must be a CUDA tensor");
     SERRON_CHECK(kernel.is_cuda(), name, ": kernel must be a CUDA tensor");
@@ -168,6 +178,7 @@ std::tuple<Tensor, Tensor> morphology_backward_impl(const Tensor& grad_output, c
     SERRON_CHECK(input.scalar_type() == kernel.scalar_type(), name, ": input and kernel must share a dtype");
     SERRON_CHECK(grad_output.scalar_type() == input.scalar_type(), name, ": grad_output and input must share a dtype");
     SERRON_CHECK(border >= kReflect && border <= kConstant, name, ": invalid border mode ", border);
+    const Algorithm requested = parse_algorithm(algo, name);
 
     const Tensor grad_output_c = torch::stable::contiguous(grad_output);
     const Tensor input_c = torch::stable::contiguous(input);
@@ -200,13 +211,8 @@ std::tuple<Tensor, Tensor> morphology_backward_impl(const Tensor& grad_output, c
     if (input_c.numel() == 0)
         return {grad_input, grad_kernel};
 
-    const bool use_separable = use_separable_path(resolve_flat(flat, kernel_c), kH, kW);
-    Tensor row_best_val;
-    Tensor row_best_dj;
-    if (use_separable) {
-        row_best_val = torch::stable::empty_like(input_c);
-        row_best_dj = torch::stable::new_empty(input_c, input_c.sizes(), torch::headeronly::ScalarType::Int);
-    }
+    // A forced tiled or element-wise launch never reads the flatness, so it skips the read-back from the device.
+    const bool is_flat = algorithm_needs_flatness(requested) && resolve_flat(flat, kernel_c);
 
     const torch::stable::accelerator::DeviceGuard device_guard(input_c.get_device_index());
     const CurrentContextGuard context_guard(input_c.get_device_index());
@@ -215,14 +221,25 @@ std::tuple<Tensor, Tensor> morphology_backward_impl(const Tensor& grad_output, c
     const auto border_mode = static_cast<BorderMode>(border);
 
     THO_DISPATCH_V2(input_c.scalar_type(), "serron_morphology_backward", AT_WRAP([&] {
-                        scalar_t* row_val_ptr = use_separable ? row_best_val.mutable_data_ptr<scalar_t>() : nullptr;
-                        int32_t* row_dj_ptr = use_separable ? row_best_dj.mutable_data_ptr<int32_t>() : nullptr;
+                        const Algorithm algorithm =
+                            resolve_algorithm(requested, is_flat, kH, kW, sizeof(scalar_t),
+                                              backward_line_elem_size<scalar_t>(), smem_budget(), name);
+                        const bool separable = algorithm == Algorithm::kSeparable;
+                        Tensor row_best_val;
+                        Tensor row_best_dj;
+                        if (separable) {
+                            row_best_val = torch::stable::empty_like(input_c);
+                            row_best_dj =
+                                torch::stable::new_empty(input_c, input_c.sizes(), torch::headeronly::ScalarType::Int);
+                        }
+                        scalar_t* row_val_ptr = separable ? row_best_val.mutable_data_ptr<scalar_t>() : nullptr;
+                        int32_t* row_dj_ptr = separable ? row_best_dj.mutable_data_ptr<int32_t>() : nullptr;
                         launch_morphology_backward<scalar_t>(
                             backward_kernels<scalar_t>(op), grad_output_c.const_data_ptr<scalar_t>(),
                             input_c.const_data_ptr<scalar_t>(), kernel_c.const_data_ptr<scalar_t>(),
                             grad_input.mutable_data_ptr<scalar_t>(), grad_kernel.mutable_data_ptr<scalar_t>(),
-                            row_val_ptr, row_dj_ptr, use_separable, N, C, H, W, kH, kW, kernel_channel_stride,
-                            border_mode, need_kernel_grad, stream);
+                            row_val_ptr, row_dj_ptr, algorithm, requested == Algorithm::kAuto, N, C, H, W, kH, kW,
+                            kernel_channel_stride, border_mode, need_kernel_grad, stream);
                     }),
                     torch::headeronly::ScalarType::Float, torch::headeronly::ScalarType::Double,
                     torch::headeronly::ScalarType::Half, torch::headeronly::ScalarType::BFloat16);
@@ -234,15 +251,15 @@ std::tuple<Tensor, Tensor> morphology_backward_impl(const Tensor& grad_output, c
 
 std::tuple<Tensor, Tensor> erode_backward(const Tensor& grad_output, const Tensor& input, const Tensor& kernel,
                                           const int64_t border, const std::optional<bool>& flat,
-                                          const bool need_kernel_grad) {
-    return morphology_backward_impl(grad_output, input, kernel, border, flat, need_kernel_grad, MorphOp::kErode,
+                                          const bool need_kernel_grad, const int64_t algo) {
+    return morphology_backward_impl(grad_output, input, kernel, border, flat, need_kernel_grad, algo, MorphOp::kErode,
                                     "serron::erode_backward");
 }
 
 std::tuple<Tensor, Tensor> dilate_backward(const Tensor& grad_output, const Tensor& input, const Tensor& kernel,
                                            const int64_t border, const std::optional<bool>& flat,
-                                           const bool need_kernel_grad) {
-    return morphology_backward_impl(grad_output, input, kernel, border, flat, need_kernel_grad, MorphOp::kDilate,
+                                           const bool need_kernel_grad, const int64_t algo) {
+    return morphology_backward_impl(grad_output, input, kernel, border, flat, need_kernel_grad, algo, MorphOp::kDilate,
                                     "serron::dilate_backward");
 }
 
