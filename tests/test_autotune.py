@@ -7,17 +7,27 @@ from __future__ import annotations
 import json
 import multiprocessing
 import os
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 import torch
 
+import serron
 from serron import _tuning_cache as cache
-from serron._algorithms import DeviceFingerprint, get_separable_min_k, set_separable_min_k
+from serron import autotune
+from serron._algorithms import (
+    DeviceFingerprint,
+    device_fingerprint,
+    get_separable_min_k,
+    set_separable_min_k,
+)
 from serron.autotune import (
     HYSTERESIS,
     apply_thresholds,
+    calibrate,
     crossover,
+    ensure_loaded,
     sweep_separable_threshold,
     threshold_key,
 )
@@ -236,3 +246,196 @@ def test_apply_thresholds_sets_each_dtype_and_pass_and_skips_unknown_keys() -> N
         for like in (f32, f16):
             set_separable_min_k(like, 0)
             set_separable_min_k(like, 0, backward=True)
+
+
+# --------------------------------------------------------------------------- #
+# calibrate and lazy loading (need a GPU)
+# --------------------------------------------------------------------------- #
+
+_DTYPES = (torch.float32, torch.float16)
+_FAST = {"ks": [3, 9, 21], "shape": (1, 1, 32, 32), "reps": 2}
+
+
+@pytest.fixture
+def fresh_state(cache_root: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Empty cache, nothing looked up yet, and the thresholds put back afterwards."""
+    monkeypatch.delenv("SERRON_AUTOTUNE", raising=False)
+    monkeypatch.delenv("SERRON_SEPARABLE_MIN_K", raising=False)
+    autotune._forget_loaded()
+    yield
+
+    for dtype in (torch.float32, torch.float16, torch.bfloat16):
+        like = torch.empty(0, dtype=dtype, device="cuda")
+        set_separable_min_k(like, 0)
+        set_separable_min_k(like, 0, backward=True)
+    autotune._forget_loaded()
+
+
+def _saved(thresholds: dict[str, int]) -> None:
+    cache.store_thresholds(device_fingerprint(), thresholds)
+
+
+@requires_cuda
+def test_calibrate_applies_saves_and_returns_the_table(fresh_state: None) -> None:
+    table = calibrate(dtypes=_DTYPES, **_FAST)
+
+    assert set(table) == {"float32:fwd", "float32:bwd", "float16:fwd", "float16:bwd"}
+    assert cache.load_thresholds(device_fingerprint()) == table
+    f32 = torch.empty(0, device="cuda")
+    assert get_separable_min_k(f32) == table["float32:fwd"]
+    assert get_separable_min_k(f32, backward=True) == table["float32:bwd"]
+
+
+@requires_cuda
+def test_calibrate_reuses_saved_entries_and_measures_only_the_rest(fresh_state: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    _saved({"float32:fwd": 7, "float32:bwd": 9})
+    swept: list[tuple[torch.dtype, bool]] = []
+
+    def fake_sweep(dtype: torch.dtype, *, backward: bool, **_: object) -> int:
+        swept.append((dtype, backward))
+        return 13
+
+    monkeypatch.setattr(autotune, "sweep_separable_threshold", fake_sweep)
+
+    table = calibrate(dtypes=_DTYPES)
+
+    assert swept == [(torch.float16, False), (torch.float16, True)]
+    assert table == {"float32:fwd": 7, "float32:bwd": 9, "float16:fwd": 13, "float16:bwd": 13}
+
+
+@requires_cuda
+def test_calibrate_force_measures_everything_again(fresh_state: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    _saved({"float32:fwd": 7, "float32:bwd": 9})
+    monkeypatch.setattr(autotune, "sweep_separable_threshold", lambda *_a, **_k: 15)
+
+    table = calibrate(dtypes=[torch.float32], force=True)
+
+    assert table == {"float32:fwd": 15, "float32:bwd": 15}
+    assert cache.load_thresholds(device_fingerprint()) == table
+
+
+@requires_cuda
+def test_calibrate_survives_an_unwritable_cache(fresh_state: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    blocker = tmp_path / "file"
+    blocker.write_text("")
+    monkeypatch.setenv("SERRON_CACHE_DIR", str(blocker / "sub"))
+    monkeypatch.setattr(autotune, "sweep_separable_threshold", lambda *_a, **_k: 13)
+
+    with pytest.warns(UserWarning) as record:
+        table = calibrate(dtypes=[torch.float32])
+
+    assert any("could not save" in str(w.message) for w in record)
+    assert get_separable_min_k(torch.empty(0, device="cuda")) == table["float32:fwd"]
+
+
+@requires_cuda
+def test_first_cuda_op_loads_the_saved_thresholds(fresh_state: None) -> None:
+    _saved({"float32:fwd": 5, "float32:bwd": 6})
+    x = torch.randn(1, 1, 16, 16, device="cuda")
+
+    serron.erosion(x, torch.zeros(3, 3, device="cuda"))
+
+    assert get_separable_min_k(x) == 5
+    assert get_separable_min_k(x, backward=True) == 6
+
+
+@requires_cuda
+def test_saved_thresholds_change_what_auto_picks(fresh_state: None) -> None:
+    from serron._algorithms import heuristic_algorithm
+    from serron.enums import Algorithm
+
+    x = torch.randn(1, 3, 32, 32, device="cuda")
+    kernel = torch.zeros(3, 5, 5, device="cuda")
+    assert heuristic_algorithm(x, kernel) == Algorithm.TILED
+
+    _saved({"float32:fwd": 5})
+    serron.dilation(x, kernel)
+
+    assert heuristic_algorithm(x, kernel) == Algorithm.SEPARABLE
+
+
+@requires_cuda
+def test_reconstruction_loads_the_saved_thresholds_too(fresh_state: None) -> None:
+    _saved({"float32:fwd": 5})
+    x = torch.rand(1, 1, 16, 16, device="cuda")
+
+    serron.reconstruction_by_dilation(x * 0.5, x, torch.zeros(3, 3, device="cuda"))
+
+    assert get_separable_min_k(x) == 5
+
+
+@requires_cuda
+def test_lookup_happens_once_per_device(fresh_state: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[object] = []
+    real = cache.load_thresholds
+    monkeypatch.setattr(cache, "load_thresholds", lambda fp: calls.append(fp) or real(fp))
+    x = torch.randn(1, 1, 16, 16, device="cuda")
+    kernel = torch.zeros(3, 3, device="cuda")
+
+    for _ in range(3):
+        serron.erosion(x, kernel)
+
+    assert len(calls) == 1
+
+
+@requires_cuda
+def test_autotune_off_ignores_the_saved_thresholds(fresh_state: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SERRON_AUTOTUNE", "0")
+    default = get_separable_min_k(torch.empty(0, device="cuda"))
+    _saved({"float32:fwd": 5})
+
+    serron.erosion(torch.randn(1, 1, 16, 16, device="cuda"), torch.zeros(3, 3, device="cuda"))
+
+    assert get_separable_min_k(torch.empty(0, device="cuda")) == default
+
+
+@requires_cuda
+def test_bad_cache_never_breaks_an_op(fresh_state: None) -> None:
+    cache.cache_path(device_fingerprint()).write_text("{not json")
+    x = torch.randn(1, 1, 16, 16, device="cuda")
+
+    with pytest.warns(UserWarning, match="serron: ignoring"):
+        out = serron.erosion(x, torch.zeros(3, 3, device="cuda"))
+
+    assert out.shape == x.shape
+
+
+@requires_cuda
+def test_no_lookup_while_capturing_a_graph(fresh_state: None) -> None:
+    _saved({"float32:fwd": 5})
+    like = torch.empty(0, device="cuda")
+    default = get_separable_min_k(like)
+    x = torch.zeros(4, device="cuda")
+    torch.cuda.synchronize()
+
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        ensure_loaded(x.device)
+        x + 1
+
+    assert get_separable_min_k(like) == default, "nothing was applied during capture"
+    ensure_loaded(x.device)
+    assert get_separable_min_k(like) == 5, "the next call outside capture does the lookup"
+
+
+@requires_cuda
+def test_sweep_refuses_to_run_while_capturing_a_graph(fresh_state: None) -> None:
+    x = torch.zeros(4, device="cuda")
+    torch.cuda.synchronize()
+
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        x + 1
+        with pytest.raises(RuntimeError, match="captured"):
+            sweep_separable_threshold(torch.float32, backward=False, **_FAST)
+
+
+def test_ensure_loaded_ignores_cpu_tensors() -> None:
+    ensure_loaded(torch.device("cpu"))
+
+
+def test_calibrate_needs_cuda(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+
+    with pytest.raises(RuntimeError, match="needs a CUDA device"):
+        calibrate()

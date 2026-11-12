@@ -139,6 +139,22 @@ accepts any positive integer. The default differs per backend because it marks w
 separable path starts beating the 2-D one, and that point is not the same on both: `11` on
 CUDA, `5` on CPU, where there is no tiled 2-D kernel to soften the `kH × kW` window.
 
+### Calibrating for your GPU
+
+The default window length is a compromise: where the separable path starts winning differs per GPU, dtype and
+between the forward and the backward pass. `serron.calibrate()` measures it on the GPU in front of you:
+
+```python
+import serron
+
+serron.calibrate()
+```
+
+The result applies to the running process and is saved under `$SERRON_CACHE_DIR` (default `~/.cache/serron`),
+keyed by GPU, CUDA version and serron version. Later processes load it on their first CUDA op, so `calibrate()`
+only has to run once. Pass `force=True` to measure again, or `dtypes=[...]` to choose the element types.
+`SERRON_AUTOTUNE=0` skips loading a saved calibration, and `SERRON_SEPARABLE_MIN_K` still overrides everything.
+
 ### The separable path
 
 Splitting a flat `kH × kW` window into a `1 × kW` row pass and a `kH × 1` column pass

@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `serron.calibrate()` measures, per GPU, dtype and pass (forward or backward), the window length from which the
+    separable path beats the 2-D kernels, applies it and saves it under `$SERRON_CACHE_DIR` (default
+    `~/.cache/serron`). Saved results load on the first CUDA op of a later process; `SERRON_AUTOTUNE=0` skips that
+    and `SERRON_SEPARABLE_MIN_K` still overrides everything (#66).
+- The compiled ops take an `algo` argument to force the element-wise, tiled or separable kernels, and raise when the
+    forced one cannot run on the problem (#66).
+
 ## [0.5.1] - 2026-10-19
 
 ### Added

@@ -9,6 +9,7 @@ import torch
 from . import _flatness
 from ._cmake_ops import ops
 from .autograd import _DilateFunction, _ErodeFunction
+from .autotune import ensure_loaded
 from .enums import BORDER_TO_INT, BorderMode
 
 
@@ -175,6 +176,7 @@ def _reconstruct(
     if not flat:
         _require_nonnegative_anchor(kernel, name)
 
+    ensure_loaded(marker.device)
     border_int = BORDER_TO_INT[border]
     step = ops.dilate if dilate else ops.erode
     clip = torch.minimum if dilate else torch.maximum

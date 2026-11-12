@@ -10,6 +10,7 @@ import torch
 
 from . import _flatness
 from ._cmake_ops import add_op_namespace_prefix, ops
+from .autotune import ensure_loaded
 from .enums import Algorithm
 
 __all__ = ["_DilateFunction", "_ErodeFunction", "add_op_namespace_prefix", "ops"]
@@ -40,6 +41,7 @@ class _ErodeFunction(torch.autograd.Function):
         border: int,
         algo: int = Algorithm.AUTO,
     ) -> torch.Tensor:
+        ensure_loaded(input_.device)
         flat = _flatness.is_flat(kernel)
         input_, kernel = _match_dtype(input_, kernel)
         ctx.save_for_backward(input_, kernel)
@@ -84,6 +86,7 @@ class _DilateFunction(torch.autograd.Function):
         border: int,
         algo: int = Algorithm.AUTO,
     ) -> torch.Tensor:
+        ensure_loaded(input_.device)
         flat = _flatness.is_flat(kernel)
         input_, kernel = _match_dtype(input_, kernel)
         ctx.save_for_backward(input_, kernel)
