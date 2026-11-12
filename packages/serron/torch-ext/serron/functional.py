@@ -7,9 +7,9 @@ from __future__ import annotations
 import torch
 
 from . import _flatness
+from ._autotune import ensure_loaded
 from ._cmake_ops import ops
 from .autograd import _DilateFunction, _ErodeFunction
-from .autotune import ensure_loaded
 from .enums import BORDER_TO_INT, BorderMode
 
 

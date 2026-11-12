@@ -8,7 +8,7 @@ from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _version
 
 from . import functional, structuring_element
-from .autotune import calibrate
+from ._autotune import autotune, calibrate
 from .enums import BorderMode, Operation
 from .functional import (
     black_hat,
@@ -36,6 +36,7 @@ __all__ = [
     "Opening2d",
     "Operation",
     "__version__",
+    "autotune",
     "black_hat",
     "calibrate",
     "closing",

@@ -8,30 +8,43 @@ import json
 import multiprocessing
 import os
 from collections.abc import Iterator
+from math import prod as math_prod
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
 
 import serron
+import serron.autograd as serron_autograd
+from serron import _autotune as autotune
 from serron import _tuning_cache as cache
-from serron import autotune
 from serron._algorithms import (
     DeviceFingerprint,
     device_fingerprint,
     get_separable_min_k,
     set_separable_min_k,
 )
-from serron.autotune import (
+from serron._autotune import (
     HYSTERESIS,
+    MIN_TUNED_ELEMENTS,
     apply_thresholds,
     calibrate,
     crossover,
     ensure_loaded,
+    select_algorithm,
+    shape_key,
     sweep_separable_threshold,
     threshold_key,
+    tune_problem,
 )
-from tests.conftest import requires_cuda
+from serron._autotune import (
+    autotune as autotune_shapes,
+)
+from serron._cmake_ops import ops
+from serron.autograd import _ErodeFunction
+from serron.enums import Algorithm
+from tests.conftest import make_image, requires_cuda
 
 _KS = [3, 5, 7, 11, 21]
 
@@ -143,10 +156,10 @@ def test_store_leaves_no_temporary_files(cache_root: Path) -> None:
         json.dumps({"version": 1}),
         json.dumps({"version": 99, "fingerprint": dict(_fingerprint()), "thresholds": {}}),
         json.dumps({"version": 1, "fingerprint": dict(_fingerprint()), "thresholds": {"float32:fwd": "11"}}),
-        json.dumps({"version": 1, "fingerprint": dict(_fingerprint()), "thresholds": {"float32:fwd": 0}}),
+        json.dumps({"version": 1, "fingerprint": dict(_fingerprint()), "thresholds": {"float32:fwd": -1}}),
         json.dumps({"version": 1, "fingerprint": dict(_fingerprint(name="other")), "thresholds": {"float32:fwd": 11}}),
     ],
-    ids=["empty", "not_json", "wrong_type", "missing_keys", "future_version", "string_value", "zero", "foreign"],
+    ids=["empty", "not_json", "wrong_type", "missing_keys", "future_version", "string_value", "negative", "foreign"],
 )
 def test_bad_cache_falls_back_with_a_warning(cache_root: Path, text: str) -> None:
     cache.cache_path(_fingerprint()).write_text(text)
@@ -439,3 +452,321 @@ def test_calibrate_needs_cuda(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(RuntimeError, match="needs a CUDA device"):
         calibrate()
+
+
+# --------------------------------------------------------------------------- #
+# Per-problem tuning
+# --------------------------------------------------------------------------- #
+
+_SHAPE = (1, 3, 128, 128)  # 49152 elements, under the real minimum, so tests lower it
+_BIG = (1, 3, 256, 256)  # 196608
+
+
+@pytest.fixture
+def fake_times(monkeypatch: pytest.MonkeyPatch) -> dict[Algorithm, float]:
+    """Replace timing with a table the test edits, and record how often a problem is timed."""
+    table: dict[Algorithm, float] = {Algorithm.ELEMENT: 3.0, Algorithm.TILED: 2.0, Algorithm.SEPARABLE: 1.0}
+    monkeypatch.setattr(autotune, "_time_candidates", lambda run, candidates, reps: {algo: table[algo] for algo in candidates})
+    return table
+
+
+@requires_cuda
+def test_shape_key_buckets_by_size_class() -> None:
+    a = shape_key(torch.float32, backward=False, flat=True, k_h=5, k_w=5, numel=1 << 20)
+    b = shape_key(torch.float32, backward=False, flat=True, k_h=5, k_w=5, numel=(1 << 21) - 1)
+
+    assert a == b == "shape:float32:fwd:flat:5x5:p21"
+    assert a != shape_key(torch.float32, backward=False, flat=True, k_h=5, k_w=5, numel=1 << 21)
+    assert a != shape_key(torch.float32, backward=True, flat=True, k_h=5, k_w=5, numel=1 << 20)
+    assert a != shape_key(torch.float16, backward=False, flat=True, k_h=5, k_w=5, numel=1 << 20)
+    assert a != shape_key(torch.float32, backward=False, flat=False, k_h=5, k_w=5, numel=1 << 20)
+
+
+@requires_cuda
+def test_tune_problem_picks_a_clear_winner(fake_times: dict[Algorithm, float]) -> None:
+    # k=5 flat: the heuristic picks tiled, separable is twice as fast.
+    assert tune_problem(_SHAPE, torch.float32, 5, 5, flat=True, backward=False) == Algorithm.SEPARABLE
+
+
+@requires_cuda
+def test_tune_problem_keeps_the_heuristic_inside_the_margin(fake_times: dict[Algorithm, float]) -> None:
+    fake_times[Algorithm.SEPARABLE] = fake_times[Algorithm.TILED] / (1 + HYSTERESIS / 2)
+
+    assert tune_problem(_SHAPE, torch.float32, 5, 5, flat=True, backward=False) == Algorithm.AUTO
+
+
+@requires_cuda
+def test_tune_problem_needs_more_than_one_candidate(fake_times: dict[Algorithm, float]) -> None:
+    # A non-flat SE too big for the tiled kernel leaves only the element-wise one.
+    assert tune_problem((1, 1, 16, 16), torch.float32, 1001, 1001, flat=False, backward=False) == Algorithm.AUTO
+
+
+@requires_cuda
+def test_tune_problem_refuses_to_run_while_capturing_a_graph(fresh_state: None) -> None:
+    x = torch.zeros(4, device="cuda")
+    torch.cuda.synchronize()
+
+    with torch.cuda.graph(torch.cuda.CUDAGraph()):
+        x + 1
+        with pytest.raises(RuntimeError, match="captured"):
+            tune_problem(_SHAPE, torch.float32, 5, 5, flat=True, backward=False)
+
+
+@requires_cuda
+def test_tune_problem_on_real_hardware_returns_a_feasible_algorithm(fresh_state: None) -> None:
+    for backward in (False, True):
+        winner = tune_problem(_BIG, torch.float32, 21, 21, flat=True, backward=backward, reps=3)
+
+        assert winner in {Algorithm.AUTO, Algorithm.ELEMENT, Algorithm.TILED, Algorithm.SEPARABLE}
+
+
+@requires_cuda
+def test_autotune_records_saves_and_skips_launch_bound_shapes(fresh_state: None, fake_times: dict[Algorithm, float]) -> None:
+    results = autotune_shapes([_BIG, (1, 1, 32, 32)], ks=[5], flat=[True])
+
+    fwd = shape_key(torch.float32, backward=False, flat=True, k_h=5, k_w=5, numel=math_prod(_BIG))
+    bwd = shape_key(torch.float32, backward=True, flat=True, k_h=5, k_w=5, numel=math_prod(_BIG))
+    assert results == {fwd: int(Algorithm.SEPARABLE), bwd: int(Algorithm.SEPARABLE)}, "the small shape is skipped"
+    assert cache.load_thresholds(device_fingerprint()) == results
+
+
+@requires_cuda
+def test_autotune_does_not_time_what_is_already_known(
+    fresh_state: None, monkeypatch: pytest.MonkeyPatch, fake_times: dict[Algorithm, float]
+) -> None:
+    calls: list[object] = []
+    real = autotune.tune_problem
+    monkeypatch.setattr(autotune, "tune_problem", lambda *a, **k: calls.append(a) or real(*a, **k))
+
+    autotune_shapes([_BIG], ks=[5], flat=[True])
+    assert len(calls) == 2
+    autotune_shapes([_BIG], ks=[5], flat=[True])
+    assert len(calls) == 2, "a second call reuses the first"
+    autotune_shapes([_BIG], ks=[5], flat=[True], force=True)
+    assert len(calls) == 4
+
+
+@requires_cuda
+def test_autotune_results_reach_a_later_process(fresh_state: None, fake_times: dict[Algorithm, float]) -> None:
+    autotune_shapes([_BIG], ks=[5], flat=[True])
+    autotune._forget_loaded()  # a new process: nothing in memory, the file is all that is left
+    x = torch.randn(_BIG, device="cuda")
+    kernel = torch.zeros(3, 5, 5, device="cuda")
+
+    ensure_loaded(x.device)
+
+    assert select_algorithm(x, kernel, True, backward=False) == int(Algorithm.SEPARABLE)
+
+
+@requires_cuda
+def test_autotune_survives_an_unwritable_cache(
+    fresh_state: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_times: dict[Algorithm, float]
+) -> None:
+    blocker = tmp_path / "file"
+    blocker.write_text("")
+    monkeypatch.setenv("SERRON_CACHE_DIR", str(blocker / "sub"))
+
+    with pytest.warns(UserWarning) as record:
+        results = autotune_shapes([_BIG], ks=[5], flat=[True])
+
+    assert any("could not save" in str(w.message) for w in record)
+    assert results
+
+
+@requires_cuda
+def test_autotune_needs_cuda(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+
+    with pytest.raises(RuntimeError, match="needs a CUDA device"):
+        autotune_shapes([_BIG])
+
+
+@requires_cuda
+def test_select_algorithm_is_a_noop_with_nothing_tuned(fresh_state: None) -> None:
+    x = torch.randn(_BIG, device="cuda")
+
+    assert select_algorithm(x, torch.zeros(3, 5, 5, device="cuda"), True, backward=False) == 0
+
+
+@requires_cuda
+def test_select_algorithm_ignores_cpu_inputs(fresh_state: None) -> None:
+    autotune._shape_table["0|anything"] = 1
+
+    assert select_algorithm(torch.randn(1, 1, 8, 8), torch.zeros(3, 3), True, backward=False) == 0
+
+
+@requires_cuda
+def test_tuned_algorithm_is_what_the_op_runs(fresh_state: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, int] = {}
+
+    def spy(name: str, real: object) -> object:
+        def call(*args: object) -> object:
+            seen[name] = int(args[-1])  # type: ignore[call-overload]
+            return real(*args)  # type: ignore[operator]
+
+        return call
+
+    monkeypatch.setattr(
+        serron_autograd, "ops", SimpleNamespace(erode=spy("fwd", ops.erode), erode_backward=spy("bwd", ops.erode_backward))
+    )
+    x = torch.randn(_BIG, device="cuda", requires_grad=True)
+    kernel = torch.zeros(3, 5, 5, device="cuda", requires_grad=True)
+    fwd = shape_key(torch.float32, backward=False, flat=True, k_h=5, k_w=5, numel=x.numel())
+    bwd = shape_key(torch.float32, backward=True, flat=True, k_h=5, k_w=5, numel=x.numel())
+    autotune._shape_table.update({f"0|{fwd}": int(Algorithm.ELEMENT), f"0|{bwd}": int(Algorithm.TILED)})
+
+    serron.erosion(x, kernel).sum().backward()
+
+    assert seen == {"fwd": int(Algorithm.ELEMENT), "bwd": int(Algorithm.TILED)}
+
+
+@requires_cuda
+def test_forcing_an_algorithm_beats_the_tuned_one(fresh_state: None) -> None:
+    x = torch.randn(_BIG, device="cuda")
+    kernel = torch.zeros(3, 5, 5, device="cuda")
+    fwd = shape_key(torch.float32, backward=False, flat=True, k_h=5, k_w=5, numel=x.numel())
+    autotune._shape_table[f"0|{fwd}"] = int(Algorithm.ELEMENT)
+    seen: list[int] = []
+    real = ops.erode
+    spy = SimpleNamespace(erode=lambda *a: (seen.append(int(a[-1])), real(*a))[1])
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(serron_autograd, "ops", spy)
+        _ErodeFunction.apply(x, kernel, 1, int(Algorithm.TILED))
+
+    assert seen == [int(Algorithm.TILED)]
+
+
+@requires_cuda
+@pytest.mark.parametrize("op", ["erosion", "dilation"])
+def test_tuned_algorithm_gives_the_same_bits(op: str, fresh_state: None, rng: torch.Generator) -> None:
+    x = make_image(rng, _BIG, device=torch.device("cuda"))
+    kernel = torch.zeros(3, 21, 21, device="cuda")
+    expected = getattr(serron, op)(x, kernel)
+
+    for algo in (Algorithm.ELEMENT, Algorithm.TILED, Algorithm.SEPARABLE):
+        key = shape_key(x.dtype, backward=False, flat=True, k_h=21, k_w=21, numel=x.numel())
+        autotune._shape_table[f"0|{key}"] = int(algo)
+        assert torch.equal(getattr(serron, op)(x, kernel), expected), algo.name
+
+
+# --------------------------------------------------------------------------- #
+# Lazy tuning
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def lazy(fresh_state: None, monkeypatch: pytest.MonkeyPatch, fake_times: dict[Algorithm, float]) -> list[dict[str, object]]:
+    """Lazy tuning on, with the problems that get timed recorded."""
+    monkeypatch.setenv("SERRON_AUTOTUNE", "1")
+    calls: list[dict[str, object]] = []
+    real = autotune.tune_problem
+    monkeypatch.setattr(autotune, "tune_problem", lambda *a, **k: calls.append(k) or real(*a, **k))
+    return calls
+
+
+@requires_cuda
+def test_lazy_tuning_tunes_a_problem_once_and_saves_it(lazy: list[dict[str, object]]) -> None:
+    x = torch.randn(_BIG, device="cuda")
+    kernel = torch.zeros(3, 5, 5, device="cuda")
+
+    for _ in range(3):
+        serron.erosion(x, kernel)
+
+    assert len(lazy) == 1
+    key = shape_key(torch.float32, backward=False, flat=True, k_h=5, k_w=5, numel=x.numel())
+    assert cache.load_thresholds(device_fingerprint()) == {key: int(Algorithm.SEPARABLE)}
+
+
+@requires_cuda
+def test_lazy_tuning_also_tunes_the_backward(lazy: list[dict[str, object]]) -> None:
+    x = torch.randn(_BIG, device="cuda", requires_grad=True)
+    kernel = torch.zeros(3, 5, 5, device="cuda", requires_grad=True)
+
+    serron.erosion(x, kernel).sum().backward()
+
+    assert [call["backward"] for call in lazy] == [False, True]
+    assert len(cache.load_thresholds(device_fingerprint()) or {}) == 2
+
+
+@requires_cuda
+def test_lazy_tuning_is_off_by_default(
+    fresh_state: None, monkeypatch: pytest.MonkeyPatch, fake_times: dict[Algorithm, float]
+) -> None:
+    calls: list[object] = []
+    monkeypatch.setattr(autotune, "tune_problem", lambda *a, **k: calls.append(a))
+
+    serron.erosion(torch.randn(_BIG, device="cuda"), torch.zeros(3, 5, 5, device="cuda"))
+
+    assert not calls
+    assert cache.load_thresholds(device_fingerprint()) is None
+
+
+@requires_cuda
+def test_lazy_tuning_skips_launch_bound_sizes(lazy: list[dict[str, object]]) -> None:
+    serron.erosion(torch.randn(1, 1, 64, 64, device="cuda"), torch.zeros(5, 5, device="cuda"))
+
+    assert not lazy
+    assert cache.load_thresholds(device_fingerprint()) is None
+
+
+@requires_cuda
+def test_lazy_tuning_never_runs_during_graph_capture(lazy: list[dict[str, object]]) -> None:
+    x = torch.randn(_BIG, device="cuda")
+    kernel = torch.zeros(3, 5, 5, device="cuda")
+    torch.cuda.synchronize()
+    ensure_loaded(x.device)
+
+    with torch.cuda.graph(torch.cuda.CUDAGraph()):
+        x + 1
+        assert select_algorithm(x, kernel, True, backward=False) == 0
+
+    assert not lazy
+    assert cache.load_thresholds(device_fingerprint()) is None
+
+
+@requires_cuda
+def test_lazy_tuning_failure_falls_back_to_the_heuristic(fresh_state: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SERRON_AUTOTUNE", "1")
+
+    def boom(*_a: object, **_k: object) -> Algorithm:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(autotune, "tune_problem", boom)
+    x = torch.randn(_BIG, device="cuda")
+
+    with pytest.warns(UserWarning, match="tuning failed"):
+        out = serron.erosion(x, torch.zeros(3, 5, 5, device="cuda"))
+    assert out.shape == x.shape
+    # The failure is remembered, so it neither warns nor retries on every call.
+    serron.erosion(x, torch.zeros(3, 5, 5, device="cuda"))
+
+
+@requires_cuda
+def test_lazy_tuning_leaves_the_callers_tensors_alone(lazy: list[object], rng: torch.Generator) -> None:
+    x = make_image(rng, _BIG, device=torch.device("cuda")).requires_grad_()
+    kernel = torch.zeros(3, 5, 5, device="cuda", requires_grad=True)
+    before = x.detach().clone()
+
+    out = serron.erosion(x, kernel)
+    out.sum().backward()
+
+    assert torch.equal(x.detach(), before)
+    assert x.grad is not None
+    assert torch.equal(out, serron.erosion(before, torch.zeros(3, 5, 5, device="cuda")))
+
+
+@requires_cuda
+def test_autotune_off_ignores_saved_problem_winners(fresh_state: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    key = shape_key(torch.float32, backward=False, flat=True, k_h=5, k_w=5, numel=math_prod(_BIG))
+    _saved({key: int(Algorithm.ELEMENT)})
+    monkeypatch.setenv("SERRON_AUTOTUNE", "0")
+    x = torch.randn(_BIG, device="cuda")
+
+    serron.erosion(x, torch.zeros(3, 5, 5, device="cuda"))
+
+    assert not autotune._shape_table
+
+
+def test_the_minimum_tuned_size_is_a_power_of_two_floor() -> None:
+    assert MIN_TUNED_ELEMENTS == 1 << 16

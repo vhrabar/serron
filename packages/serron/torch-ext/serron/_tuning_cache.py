@@ -52,7 +52,7 @@ def _parse(raw: str, fingerprint: DeviceFingerprint) -> dict[str, int] | None:
             data["version"] == _FORMAT_VERSION
             and data["fingerprint"] == dict(fingerprint)
             and isinstance(thresholds, dict)
-            and all(isinstance(k, str) and type(v) is int and v > 0 for k, v in thresholds.items())
+            and all(isinstance(k, str) and type(v) is int and v >= 0 for k, v in thresholds.items())
         )
     except (ValueError, KeyError, TypeError):
         return None

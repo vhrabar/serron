@@ -9,8 +9,8 @@ from typing import override
 import torch
 
 from . import _flatness
+from ._autotune import ensure_loaded, select_algorithm
 from ._cmake_ops import add_op_namespace_prefix, ops
-from .autotune import ensure_loaded
 from .enums import Algorithm
 
 __all__ = ["_DilateFunction", "_ErodeFunction", "add_op_namespace_prefix", "ops"]
@@ -48,7 +48,9 @@ class _ErodeFunction(torch.autograd.Function):
         ctx.border = border  # type: ignore[attr-defined]
         ctx.flat = flat  # type: ignore[attr-defined]
         ctx.algo = int(algo)  # type: ignore[attr-defined]
-        result: torch.Tensor = ops.erode(input_, kernel, border, flat, int(algo))
+        result: torch.Tensor = ops.erode(
+            input_, kernel, border, flat, int(algo) or select_algorithm(input_, kernel, flat, backward=False)
+        )
         return result
 
     @staticmethod
@@ -69,7 +71,7 @@ class _ErodeFunction(torch.autograd.Function):
             ctx.border,  # type: ignore[attr-defined]
             ctx.flat,  # type: ignore[attr-defined]
             needs_kernel,
-            ctx.algo,  # type: ignore[attr-defined]
+            ctx.algo or select_algorithm(input_, kernel, ctx.flat, backward=True),  # type: ignore[attr-defined]
         )
         return (grad_input if needs_input else None), (grad_kernel if needs_kernel else None), None, None
 
@@ -93,7 +95,9 @@ class _DilateFunction(torch.autograd.Function):
         ctx.border = border  # type: ignore[attr-defined]
         ctx.flat = flat  # type: ignore[attr-defined]
         ctx.algo = int(algo)  # type: ignore[attr-defined]
-        result: torch.Tensor = ops.dilate(input_, kernel, border, flat, int(algo))
+        result: torch.Tensor = ops.dilate(
+            input_, kernel, border, flat, int(algo) or select_algorithm(input_, kernel, flat, backward=False)
+        )
         return result
 
     @staticmethod
@@ -114,6 +118,6 @@ class _DilateFunction(torch.autograd.Function):
             ctx.border,  # type: ignore[attr-defined]
             ctx.flat,  # type: ignore[attr-defined]
             needs_kernel,
-            ctx.algo,  # type: ignore[attr-defined]
+            ctx.algo or select_algorithm(input_, kernel, ctx.flat, backward=True),  # type: ignore[attr-defined]
         )
         return (grad_input if needs_input else None), (grad_kernel if needs_kernel else None), None, None
