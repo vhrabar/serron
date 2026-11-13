@@ -12,6 +12,7 @@ import torch
 import torch.nn.functional as F
 
 from serron import BorderMode
+from serron import _seeds as seeds
 
 # --------------------------------------------------------------------------- #
 # Devices
@@ -44,6 +45,12 @@ def _isolated_tuning_cache(tmp_path_factory: pytest.TempPathFactory) -> Iterator
         os.environ.pop("SERRON_CACHE_DIR", None)
     else:
         os.environ["SERRON_CACHE_DIR"] = previous
+
+
+@pytest.fixture(autouse=True)
+def _no_shipped_seeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests expect the built-in thresholds. The seed shipped for the GPU they run on would change them."""
+    monkeypatch.setattr(seeds, "seed_thresholds", lambda capability: None)
 
 
 @pytest.fixture(params=DEVICES)

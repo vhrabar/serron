@@ -12,6 +12,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
     separable path beats the 2-D kernels, applies it and saves it under `$SERRON_CACHE_DIR` (default
     `~/.cache/serron`). Saved results load on the first CUDA op of a later process; `SERRON_AUTOTUNE=0` skips that
     and `SERRON_SEPARABLE_MIN_K` still overrides everything (#66).
+- Measured separable thresholds ship with the library, keyed by compute capability, so a GPU someone has already
+    calibrated starts out with the right algorithm instead of the one-size default. Compute capability 12.0 (RTX 50
+    series) is included. A calibration saved on the machine overrides them key by key, `SERRON_SEPARABLE_MIN_K`
+    overrides both, and `SERRON_AUTOTUNE=0` ignores them. `python -m benchmarks.make_seed_table` records another
+    architecture, and `--check` tells whether the shipped values still hold (#66).
 - `serron.autotune(shapes=[...])` times every feasible algorithm on given input shapes and remembers the winner per
     problem, used only where it beats the built-in choice by 5%. `SERRON_AUTOTUNE=1` does the same lazily, the first
     time a problem is seen; it is off by default. Nothing is tuned during CUDA graph capture or for inputs of up to 65536

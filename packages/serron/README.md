@@ -142,7 +142,9 @@ CUDA, `5` on CPU, where there is no tiled 2-D kernel to soften the `kH × kW` wi
 ### Calibrating for your GPU
 
 The default window length is a compromise: where the separable path starts winning differs per GPU, dtype and
-between the forward and the backward pass. `serron.calibrate()` measures it on the GPU in front of you:
+between the forward and the backward pass. serron ships measured values for the architectures someone has
+calibrated (compute capability 12.0 so far), so those start out right. For any other GPU, or to measure your own,
+`serron.calibrate()` times it on the GPU in front of you:
 
 ```python
 import serron
@@ -153,7 +155,8 @@ serron.calibrate()
 The result applies to the running process and is saved under `$SERRON_CACHE_DIR` (default `~/.cache/serron`),
 keyed by GPU, CUDA version and serron version. Later processes load it on their first CUDA op, so `calibrate()`
 only has to run once. Pass `force=True` to measure again, or `dtypes=[...]` to choose the element types.
-`SERRON_SEPARABLE_MIN_K` still overrides everything.
+What applies, in order: `SERRON_SEPARABLE_MIN_K`, then what `calibrate()` saved on this machine, then the shipped
+values for the GPU's compute capability, then the built-in default of 11 (5 on CPU).
 
 ### Tuning for shapes
 
@@ -175,12 +178,12 @@ the first CUDA op of a later process. Nothing is ever tuned while a CUDA graph i
 |----------------|-------------------------------------------------------------------------------------------------|
 | unset          | Load saved results; never tune on its own                                                       |
 | `1`            | Also tune a problem the first time it is seen. That one call pays for it (about 0.2–0.6 s)      |
-| `0`            | Ignore saved results and use the built-in choice                                                |
+| `0`            | Ignore saved and shipped results and use the built-in choice                                    |
 
 ### The separable path
 
 Splitting a flat `kH × kW` window into a `1 × kW` row pass and a `kH × 1` column pass
-already drops the per-pixel work from `kH × kW` to `kH + kW`, and the Van Herk–Gil–Werman algorithm 
+already drops the per-pixel work from `kH × kW` to `kH + kW`, and the Van Herk–Gil–Werman algorithm
 drops it further to a constant three operations per ouput, no matter the sequence length.
 
 On CUDA both scans sit in shared memory. A chunk at least a warp wide gets a warp to
@@ -242,7 +245,7 @@ uv sync --no-default-groups --group dev --group cpu        # CPU-only, oldest su
 ```
 
 On Windows on ARM, the `cu134-win-arm64` group pulls NVIDIA's `+cu134` torch wheels from
-`https://pypi.nvidia.com/nvtorch_oot/`. 
+`https://pypi.nvidia.com/nvtorch_oot/`.
 
 ```bash
 uv sync --no-default-groups --group dev --group cu134-win-arm64 # Windows on ARM, CUDA 13.4

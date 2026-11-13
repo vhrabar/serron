@@ -17,7 +17,7 @@ from collections.abc import Callable, Sequence
 
 import torch
 
-from . import _tuning_cache
+from . import _seeds, _tuning_cache
 from ._algorithms import device_fingerprint, feasible_algorithms, heuristic_algorithm, set_separable_min_k
 from ._cmake_ops import ops
 from ._timing import time_ms
@@ -256,6 +256,7 @@ def calibrate(
         raise RuntimeError("serron: calibrate needs a CUDA device")
     index = torch.device("cuda", torch.cuda.current_device()).index if device is None else torch.device(device).index
     fingerprint = device_fingerprint(index)
+    ensure_loaded(torch.device("cuda", index))  # seeds for the dtypes not measured below stay in force
 
     wanted = {threshold_key(dtype, backward=bw): (dtype, bw) for dtype in dtypes for bw in (False, True)}
     stored = _tuning_cache.load_thresholds(fingerprint) or {}
@@ -299,13 +300,16 @@ def _mode() -> str:
 
 def ensure_loaded(device: torch.device) -> None:
     """
-    Load the results saved for ``device``, once per process.
+    Load the thresholds and tuned problems known for ``device``, once per process.
+
+    What is known is the shipped seed for the device's architecture (see :mod:`serron._seeds`), overlaid with whatever
+    was saved on this machine.
 
     Called before a CUDA op runs. It looks at the cache the first time a device is seen, applies what it finds, and
     afterwards costs one set lookup. It never raises: a cache that cannot be used leaves the defaults in force. It
     does nothing under CUDA graph capture, and tries again at the next call outside it.
 
-    ``SERRON_AUTOTUNE=0`` turns the lookup off. ``SERRON_AUTOTUNE=1`` also lets :func:`select_algorithm` tune
+    ``SERRON_AUTOTUNE=0`` turns the lookup off, shipped seeds included. ``SERRON_AUTOTUNE=1`` also lets :func:`select_algorithm` tune
     problems it has not seen.
 
     :param device: device of the op's input. Non-CUDA devices are ignored.
@@ -323,9 +327,12 @@ def ensure_loaded(device: torch.device) -> None:
         if mode == "0":
             return
         try:
-            saved = _tuning_cache.load_thresholds(device_fingerprint(index))
-            if saved:
-                _adopt(saved, index)
+            fingerprint = device_fingerprint(index)
+            # A seed is the starting point for an architecture; whatever this machine saved overrides it key by key.
+            seed = _seeds.seed_thresholds(fingerprint["capability"]) or {}
+            known = {**seed, **(_tuning_cache.load_thresholds(fingerprint) or {})}
+            if known:
+                _adopt(known, index)
         except Exception as exc:
             warnings.warn(f"serron: could not load the saved calibration, using the defaults: {exc}", stacklevel=2)
 

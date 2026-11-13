@@ -1,0 +1,41 @@
+{
+  "devices": {
+    "12.0": {
+      "measured_on": "NVIDIA GeForce RTX 5070 Ti",
+      "measured_with": {
+        "cuda": "13.2",
+        "date": "2026-11-13",
+        "ks": [
+          3,
+          5,
+          7,
+          9,
+          11,
+          13,
+          15,
+          21,
+          31,
+          63
+        ],
+        "reps": 40,
+        "serron": "0.5.2",
+        "shape": [
+          1,
+          3,
+          512,
+          512
+        ],
+        "torch": "2.14.1+cu132"
+      },
+      "thresholds": {
+        "bfloat16:bwd": 21,
+        "bfloat16:fwd": 13,
+        "float16:bwd": 21,
+        "float16:fwd": 13,
+        "float32:bwd": 21,
+        "float32:fwd": 11
+      }
+    }
+  },
+  "version": 1
+}
