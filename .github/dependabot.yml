@@ -15,7 +15,7 @@ updates:
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
     groups:
       dev-tools:
-        patterns: ["ruff", "pyrefly", "pytest", "pytest-*", "cmake", "ninja", "scikit-build-core"]
+        patterns: ["ruff", "pyrefly", "prek", "pytest", "pytest-*", "cmake", "ninja", "scikit-build-core"]
       bench-and-stubs:
         patterns: ["kornia", "*-stubs"]
       python:
@@ -34,7 +34,8 @@ updates:
 
   # Dockerfile base images
   - package-ecosystem: "docker"
-    directory: "/"
+    directory: "/"      # clanmg format
+
     target-branch: "dev"
     schedule:
       interval: "weekly"

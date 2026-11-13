@@ -2,7 +2,7 @@
 name = "serron-workspace"
 version = "0"
 dependencies = [
-    "kornia>=0.8.3; sys_platform != 'win32' or platform_machine != 'ARM64'",
+    "kornia>=0.9.0; sys_platform != 'win32' or platform_machine != 'ARM64'",
     "scikit-build-core==1.1.1",
     "scipy-stubs~=1.18.1.1",
     "serron",
@@ -47,8 +47,9 @@ torch = [
 dev = [
     "pytest",
     "pytest-benchmark",
-    "ruff==0.16.10",
+    "ruff==0.17.4",
     "pyrefly",
+    "prek",
     "scikit-build-core",
     "cmake==4.4.4",
     "ninja",

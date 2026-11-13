@@ -159,6 +159,7 @@ if(SERRON_CUDA)
             csrc/cuda/bindings.cpp
             csrc/cuda/morphology/operators.cpp
             csrc/cuda/morphology/backward.cpp
+            csrc/cuda/morphology/dispatch_info.cpp
             csrc/cuda/utils/driver.cpp
             ${_serron_fatbin_headers}
     )

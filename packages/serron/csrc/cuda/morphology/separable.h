@@ -23,10 +23,11 @@ namespace serron {
 using torch::stable::Tensor;
 
 /**
- * Window length at which the separable r+c path is preferred over the tiled/GMEM 2-D kernels, for a flat,
- * axis-separable structuring element.
+ * Window length set by SERRON_SEPARABLE_MIN_K, which beats every per-device threshold (see @ref separable_min_k).
+ *
+ * @return The window length, or 0 when the variable is unset or not a positive integer.
  */
-inline int64_t separable_min_k() {
+inline int64_t separable_min_k_override() {
     static const int64_t value = [] {
         if (const char* env = std::getenv("SERRON_SEPARABLE_MIN_K")) {
             char* end = nullptr;
@@ -35,7 +36,7 @@ inline int64_t separable_min_k() {
                 return static_cast<int64_t>(parsed);
             }
         }
-        return static_cast<int64_t>(11);
+        return static_cast<int64_t>(0);
     }();
     return value;
 }
@@ -105,14 +106,6 @@ inline bool se_is_flat(const Tensor& kernel_c) {
  */
 inline bool resolve_flat(const std::optional<bool>& flat, const Tensor& kernel_c) {
     return flat.has_value() ? *flat : se_is_flat(kernel_c);
-}
-
-/**
- * True when @p is_flat and (@p kH, @p kW) justify the separable r+c path over the tiled/GMEM 2-D kernels, per @ref
- * separable_min_k.
- */
-inline bool use_separable_path(const bool is_flat, const int64_t kH, const int64_t kW) {
-    return is_flat && std::max(kH, kW) >= separable_min_k();
 }
 
 } // namespace serron

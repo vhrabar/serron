@@ -4,11 +4,15 @@ Shared fixtures, constants and pure-PyTorch reference implementations for the te
 
 from __future__ import annotations
 
+import os
+from collections.abc import Iterator
+
 import pytest
 import torch
 import torch.nn.functional as F
 
 from serron import BorderMode
+from serron import _seeds as seeds
 
 # --------------------------------------------------------------------------- #
 # Devices
@@ -29,6 +33,24 @@ PRIMITIVES = ["erosion", "dilation"]
 COMPOSITES = ["opening", "closing", "gradient", "top_hat", "black_hat"]
 ALL_OPS = PRIMITIVES + COMPOSITES
 BORDERS = [BorderMode.REFLECT, BorderMode.REPLICATE, BorderMode.CONSTANT]
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _isolated_tuning_cache(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    """Keep a calibration saved on the developer's machine from changing which algorithm the tests exercise."""
+    previous = os.environ.get("SERRON_CACHE_DIR")
+    os.environ["SERRON_CACHE_DIR"] = str(tmp_path_factory.mktemp("serron-cache"))
+    yield
+    if previous is None:
+        os.environ.pop("SERRON_CACHE_DIR", None)
+    else:
+        os.environ["SERRON_CACHE_DIR"] = previous
+
+
+@pytest.fixture(autouse=True)
+def _no_shipped_seeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests expect the built-in thresholds. The seed shipped for the GPU they run on would change them."""
+    monkeypatch.setattr(seeds, "seed_thresholds", lambda capability: None)
 
 
 @pytest.fixture(params=DEVICES)

@@ -154,6 +154,48 @@ accepts any positive integer. The default differs per backend because it marks w
 separable path starts beating the 2-D one, and that point is not the same on both: `11` on
 CUDA, `5` on CPU, where there is no tiled 2-D kernel to soften the `kH × kW` window.
 
+### Calibrating for your GPU
+
+The default window length is a compromise: where the separable path starts winning differs per GPU, dtype and
+between the forward and the backward pass. serron ships measured values for the architectures someone has
+calibrated (compute capability 12.0 so far), so those start out right. For any other GPU, or to measure your own,
+`serron.calibrate()` times it on the GPU in front of you:
+
+```python
+import serron
+
+serron.calibrate()  # a few seconds, once per GPU
+```
+
+The result applies to the running process and is saved under `$SERRON_CACHE_DIR` (default `~/.cache/serron`),
+keyed by GPU, CUDA version and serron version. Later processes load it on their first CUDA op, so `calibrate()`
+only has to run once. Pass `force=True` to measure again, or `dtypes=[...]` to choose the element types.
+What applies, in order: `SERRON_SEPARABLE_MIN_K`, then what `calibrate()` saved on this machine, then the shipped
+values for the GPU's compute capability, then the built-in default of 11 (5 on CPU).
+
+### Tuning for shapes
+
+`calibrate()` moves one threshold. To time every algorithm on the problems you actually run, warm them up ahead of
+time:
+
+```python
+serron.autotune(shapes=[(8, 3, 512, 512), (16, 3, 1024, 1024)], ks=[7, 15, 31])
+```
+
+Each combination of shape, window length, dtype and structuring-element kind is timed forward and backward on
+scratch tensors, so none of your tensors are touched. A winner replaces the built-in choice only where it is at least
+5% faster. A tuning also serves shapes within a factor of two in `N*C*H*W`, and inputs of up to 65536 elements (`1x1x256x256`) are left
+to the built-in choice because they are bound by launch latency. Results are saved with the calibration and loaded on
+the first CUDA op of a later process. Nothing is ever tuned while a CUDA graph is being captured.
+
+`SERRON_AUTOTUNE` controls this:
+
+| Value          | Effect                                                                                          |
+|----------------|-------------------------------------------------------------------------------------------------|
+| unset          | Load saved results; never tune on its own                                                       |
+| `1`            | Also tune a problem the first time it is seen. That one call pays for it (about 0.2–0.6 s)      |
+| `0`            | Ignore saved and shipped results and use the built-in choice                                    |
+
 ### The separable path
 
 Splitting a flat `kH × kW` window into a `1 × kW` row pass and a `kH × 1` column pass
@@ -218,7 +260,7 @@ uv sync --no-default-groups --group dev --group cpu        # CPU-only, oldest su
 ```
 
 On Windows on ARM, the `cu134-win-arm64` group pulls NVIDIA's `+cu134` torch wheels from
-`https://pypi.nvidia.com/nvtorch_oot/`. 
+`https://pypi.nvidia.com/nvtorch_oot/`.
 
 ```bash
 uv sync --no-default-groups --group dev --group cu134-win-arm64 # Windows on ARM, CUDA 13.4

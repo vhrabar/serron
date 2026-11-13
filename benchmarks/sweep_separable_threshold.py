@@ -5,45 +5,40 @@ Crossover sweep behind the ``SERRON_SEPARABLE_MIN_K`` defaults.
 from __future__ import annotations
 
 import argparse
-import json
-import os
-import subprocess
-import sys
+
+import torch
 
 from benchmarks._table import markdown_table
+from serron import BorderMode
+from serron._algorithms import feasible_algorithms
+from serron._timing import time_ms
+from serron.autograd import _DilateFunction, _ErodeFunction
+from serron.enums import BORDER_TO_INT, Algorithm
 
 _COLUMNS = ("k", "separable fwd (ms)", "direct fwd (ms)", "fwd", "separable f+b (ms)", "direct f+b (ms)", "f+b")
 _ALIGNS = "rrrrrrr"
 
-# direct ovveride
-_NEVER = 1 << 20
+_BORDERS = {"reflect": BorderMode.REFLECT, "replicate": BorderMode.REPLICATE, "constant": BorderMode.CONSTANT}
+_FUNCTIONS = {"erosion": _ErodeFunction, "dilation": _DilateFunction}
 
 
-def _measure(shape: str, k: int, op: str, border: str, reps: int, min_k: int) -> dict[str, float]:
-    """Time one configuration in a fresh process with ``SERRON_SEPARABLE_MIN_K`` set to ``min_k``."""
-    out = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "benchmarks._separable_worker",
-            "--shape",
-            shape,
-            "--k",
-            str(k),
-            "--op",
-            op,
-            "--border",
-            border,
-            "--reps",
-            str(reps),
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-        env={**os.environ, "SERRON_SEPARABLE_MIN_K": str(min_k)},
-    )
-    result: dict[str, float] = json.loads(out.stdout.strip().splitlines()[-1])
-    return result
+def _measure(x: torch.Tensor, kernel: torch.Tensor, op: str, border: int, algo: Algorithm, reps: int) -> dict[str, float]:
+    """Time the forward and the forward+backward of ``op`` forced to ``algo``."""
+    function = _FUNCTIONS[op]
+
+    def fwd() -> torch.Tensor:
+        out: torch.Tensor = function.apply(x, kernel, border, int(algo))
+        return out
+
+    x_g = x.clone().requires_grad_(True)
+    kernel_g = kernel.clone().requires_grad_(True)
+
+    def fwd_bwd() -> None:
+        function.apply(x_g, kernel_g, border, int(algo)).sum().backward()
+        x_g.grad = None
+        kernel_g.grad = None
+
+    return {"fwd_ms": time_ms(fwd, reps), "fwd_bwd_ms": time_ms(fwd_bwd, reps)}
 
 
 def _first_lasting_win(ks: list[int], wins: list[bool]) -> int | None:
@@ -65,15 +60,28 @@ def main() -> None:
     parser.add_argument("--reps", type=int, default=30)
     args = parser.parse_args()
 
-    ks = [int(x) for x in args.ks.split(",")]
+    ks = [int(v) for v in args.ks.split(",")]
     rows: list[list[str]] = []
+    measured: list[int] = []
     fwd_wins: list[bool] = []
     both_wins: list[bool] = []
 
-    for k in ks:
-        sep = _measure(args.shape, k, args.op, args.border, args.reps, min_k=k)
-        direct = _measure(args.shape, k, args.op, args.border, args.reps, min_k=_NEVER)
+    n, c, h, w = (int(v) for v in args.shape.split(","))
+    x = torch.randn(n, c, h, w, device="cuda")
+    border = BORDER_TO_INT[_BORDERS[args.border]]
 
+    for k in ks:
+        kernel = torch.zeros(c, k, k, device="cuda")  # flat -> separable-eligible
+        # A window too long for either pass to stage cannot be compared.
+        candidates = feasible_algorithms(x, kernel, flat=True, backward=True)
+        if Algorithm.SEPARABLE not in candidates:
+            continue
+        direct_algo = Algorithm.TILED if Algorithm.TILED in candidates else Algorithm.ELEMENT
+
+        sep = _measure(x, kernel, args.op, border, Algorithm.SEPARABLE, args.reps)
+        direct = _measure(x, kernel, args.op, border, direct_algo, args.reps)
+
+        measured.append(k)
         fwd_wins.append(sep["fwd_ms"] < direct["fwd_ms"])
         both_wins.append(sep["fwd_bwd_ms"] < direct["fwd_bwd_ms"])
 
@@ -89,14 +97,12 @@ def main() -> None:
             ]
         )
 
-    import torch
-
     print(f"\n{args.op}, {args.shape}, {args.border} border, on {torch.cuda.get_device_name(0)}.\n")
     print(markdown_table(_COLUMNS, rows, _ALIGNS))
-    crossover_fwd = _first_lasting_win(ks, fwd_wins)
-    crossover_both = _first_lasting_win(ks, both_wins)
+    crossover_fwd = _first_lasting_win(measured, fwd_wins)
+    crossover_both = _first_lasting_win(measured, both_wins)
     print(f"\nSeparable path wins from k={crossover_fwd} (forward), k={crossover_both} (forward+backward) upwards.")
-    print("SERRON_SEPARABLE_MIN_K should be the forward+backward figure.")
+    print("The forward+backward figure is the one for SERRON_SEPARABLE_MIN_K.")
 
 
 if __name__ == "__main__":

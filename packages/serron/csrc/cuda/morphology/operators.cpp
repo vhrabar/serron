@@ -1,10 +1,12 @@
 #include "ops.h"
 
 // Generated from forward_kernels.cu by cmake/embed_fatbin.cmake.
+#include <cuda/morphology/algorithm.h>
 #include <cuda/morphology/entry_points.h>
 #include <cuda/morphology/enums.h>
 #include <cuda/morphology/kernel_tables.h>
 #include <cuda/morphology/separable.h>
+#include <cuda/morphology/thresholds.h>
 #include <cuda/utils/border_mode.h>
 #include <cuda/utils/declarations.h>
 #include <cuda/utils/driver.h>
@@ -15,6 +17,7 @@
 
 #include <compat/check.h>
 #include <forward_fatbin.h>
+#include <morph_algorithm.h>
 #include <torch/csrc/stable/accelerator.h>
 #include <torch/csrc/stable/ops.h>
 #include <torch/headeronly/core/Dispatch_v2.h>
@@ -100,38 +103,46 @@ bool launch_morphology_separable(const ForwardKernels<scalar_t>& kernels, const 
 }
 
 /**
- * Launch the morphology forward pass on @p stream.
+ * Launch the morphology forward pass on @p stream with @p algorithm, which must already be resolved (see @ref
+ * resolve_algorithm) and cannot be @ref Algorithm::kAuto.
  *
+ * @param may_fall_back  Whether a launch whose shared-memory setup the driver rejects may fall back to the next
+ * algorithm down (separable, then tiled, then element-wise). Only the library's own choice may; a forced
+ * algorithm that cannot launch throws.
  */
 template <typename scalar_t>
 void launch_morphology(const ForwardKernels<scalar_t>& kernels, const scalar_t* input, const scalar_t* kernel,
-                       scalar_t* output, scalar_t* scratch, bool use_separable, int64_t N, int64_t C, int64_t H,
-                       int64_t W, int64_t kH, int64_t kW, int64_t kernel_channel_stride, BorderMode border,
-                       CUstream stream) {
+                       scalar_t* output, scalar_t* scratch, Algorithm algorithm, bool may_fall_back, int64_t N,
+                       int64_t C, int64_t H, int64_t W, int64_t kH, int64_t kW, int64_t kernel_channel_stride,
+                       BorderMode border, CUstream stream) {
     const size_t budget = smem_budget();
 
-    if (use_separable && line_smem_bytes(1, std::max(kH, kW), sizeof(scalar_t)) <= budget &&
-        launch_morphology_separable<scalar_t>(kernels, input, scratch, output, N, C, H, W, kH, kW, border, stream)) {
-        return;
+    if (algorithm == Algorithm::kSeparable) {
+        if (launch_morphology_separable<scalar_t>(kernels, input, scratch, output, N, C, H, W, kH, kW, border,
+                                                  stream)) {
+            return;
+        }
+        SERRON_CHECK(may_fall_back, "serron: could not configure shared memory for the separable kernels");
+        algorithm = tiled_feasible(kH, kW, sizeof(scalar_t), budget) ? Algorithm::kTiled : Algorithm::kElement;
     }
 
-    const int64_t tile_w = TILE_X + kW - 1;
-    const int64_t tile_h = TILE_Y + kH - 1;
-    const size_t smem = (static_cast<size_t>(tile_h * tile_w) + static_cast<size_t>(kH * kW)) * sizeof(scalar_t);
-
-    // Tile if it fits, element-wise otherwise
-    if (smem <= budget && configure_kernel_smem(kernels.tiled, smem)) {
-        constexpr Dim3 block(TILE_X, TILE_Y);
-        const Dim3 grid(static_cast<unsigned int>((W + TILE_X - 1) / TILE_X),
-                        static_cast<unsigned int>((H + TILE_Y - 1) / TILE_Y), static_cast<unsigned int>(N * C));
-        launch_kernel(kernels.tiled, grid, block, smem, stream, input, kernel, output, C, H, W, kH, kW,
-                      kernel_channel_stride, border);
-    } else {
-        const int64_t total = N * C * H * W;
-        const auto blocks = static_cast<unsigned int>((total + THREADS - 1) / THREADS);
-        launch_kernel(kernels.element, blocks, THREADS, 0, stream, input, kernel, output, N, C, H, W, kH, kW,
-                      kernel_channel_stride, border);
+    if (algorithm == Algorithm::kTiled) {
+        const size_t smem = tiled_smem_bytes(kH, kW, sizeof(scalar_t));
+        if (configure_kernel_smem(kernels.tiled, smem)) {
+            constexpr Dim3 block(TILE_X, TILE_Y);
+            const Dim3 grid(static_cast<unsigned int>((W + TILE_X - 1) / TILE_X),
+                            static_cast<unsigned int>((H + TILE_Y - 1) / TILE_Y), static_cast<unsigned int>(N * C));
+            launch_kernel(kernels.tiled, grid, block, smem, stream, input, kernel, output, C, H, W, kH, kW,
+                          kernel_channel_stride, border);
+            return;
+        }
+        SERRON_CHECK(may_fall_back, "serron: could not configure shared memory for the tiled kernels");
     }
+
+    const int64_t total = N * C * H * W;
+    const auto blocks = static_cast<unsigned int>((total + THREADS - 1) / THREADS);
+    launch_kernel(kernels.element, blocks, THREADS, 0, stream, input, kernel, output, N, C, H, W, kH, kW,
+                  kernel_channel_stride, border);
 }
 
 /**
@@ -142,14 +153,15 @@ void launch_morphology(const ForwardKernels<scalar_t>& kernels, const scalar_t* 
  * @param kernel        CUDA structuring element of shape (kH, kW), shared across channels, or (C, kH, kW) for a
  * per-channel element; same dtype as @p input.
  * @param border        Boundary mode (@ref BorderMode encoding) applied at the image edges.
+ * @param algo          Algorithm to run (@ref Algorithm encoding); auto lets the library choose.
  * @param op            Operation to apply (@ref MorphOp).
  * @param name          Qualified caller name ("serron::erode") used to prefix diagnostics.
  * @return              Result tensor, same shape and dtype as @p input.
  * @throws std::runtime_error   if the tensors are not on CUDA, have the wrong rank or dtype, the channel counts
- * disagree, or @p border is out of range.
+ * disagree, or @p border or @p algo is out of range, or a forced @p algo cannot run on this problem.
  */
 Tensor morphology_impl(const Tensor& input, const Tensor& kernel, int64_t border, const std::optional<bool>& flat,
-                       MorphOp op, const char* name) {
+                       int64_t algo, MorphOp op, const char* name) {
     SERRON_CHECK(input.is_cuda(), name, ": input must be a CUDA tensor");
     SERRON_CHECK(kernel.is_cuda(), name, ": kernel must be a CUDA tensor");
     SERRON_CHECK(input.dim() == 4, name, ": input must be 4-D (N, C, H, W), got ", input.dim(), "-D");
@@ -157,6 +169,7 @@ Tensor morphology_impl(const Tensor& input, const Tensor& kernel, int64_t border
                  kernel.dim(), "-D");
     SERRON_CHECK(input.scalar_type() == kernel.scalar_type(), name, ": input and kernel must share a dtype");
     SERRON_CHECK(border >= kReflect && border <= kConstant, name, ": invalid border mode ", border);
+    const Algorithm requested = parse_algorithm(algo, name);
 
     const Tensor input_c = torch::stable::contiguous(input);
     const Tensor kernel_c = torch::stable::contiguous(kernel);
@@ -186,11 +199,8 @@ Tensor morphology_impl(const Tensor& input, const Tensor& kernel, int64_t border
     if (output.numel() == 0)
         return output;
 
-    const bool use_separable = use_separable_path(resolve_flat(flat, kernel_c), kH, kW);
-    Tensor scratch;
-    if (use_separable) {
-        scratch = torch::stable::empty_like(input_c);
-    }
+    // A forced tiled or element-wise launch never reads the flatness, so it skips the read-back from the device.
+    const bool is_flat = algorithm_needs_flatness(requested) && resolve_flat(flat, kernel_c);
 
     const torch::stable::accelerator::DeviceGuard device_guard(input_c.get_device_index());
     const CurrentContextGuard context_guard(input_c.get_device_index());
@@ -198,15 +208,24 @@ Tensor morphology_impl(const Tensor& input, const Tensor& kernel, int64_t border
         static_cast<CUstream>(torch::stable::accelerator::getCurrentStream(input_c.get_device_index()).nativeHandle());
     const auto border_mode = static_cast<BorderMode>(border);
 
-    THO_DISPATCH_V2(input_c.scalar_type(), "serron_morphology", AT_WRAP([&] {
-                        scalar_t* scratch_ptr = use_separable ? scratch.mutable_data_ptr<scalar_t>() : nullptr;
-                        launch_morphology<scalar_t>(forward_kernels<scalar_t>(op), input_c.const_data_ptr<scalar_t>(),
-                                                    kernel_c.const_data_ptr<scalar_t>(),
-                                                    output.mutable_data_ptr<scalar_t>(), scratch_ptr, use_separable, N,
-                                                    C, H, W, kH, kW, kernel_channel_stride, border_mode, stream);
-                    }),
-                    torch::headeronly::ScalarType::Float, torch::headeronly::ScalarType::Double,
-                    torch::headeronly::ScalarType::Half, torch::headeronly::ScalarType::BFloat16);
+    THO_DISPATCH_V2(
+        input_c.scalar_type(), "serron_morphology", AT_WRAP([&] {
+            const AlgorithmProblem problem = make_problem<scalar_t>(
+                kH, kW, is_flat, smem_budget(),
+                separable_min_k(input_c.get_device_index(), input_c.scalar_type(), false), false);
+            const Algorithm algorithm = resolve_algorithm(requested, problem, name);
+            Tensor scratch;
+            if (algorithm == Algorithm::kSeparable) {
+                scratch = torch::stable::empty_like(input_c);
+            }
+            scalar_t* scratch_ptr = algorithm == Algorithm::kSeparable ? scratch.mutable_data_ptr<scalar_t>() : nullptr;
+            launch_morphology<scalar_t>(forward_kernels<scalar_t>(op), input_c.const_data_ptr<scalar_t>(),
+                                        kernel_c.const_data_ptr<scalar_t>(), output.mutable_data_ptr<scalar_t>(),
+                                        scratch_ptr, algorithm, requested == Algorithm::kAuto, N, C, H, W, kH, kW,
+                                        kernel_channel_stride, border_mode, stream);
+        }),
+        torch::headeronly::ScalarType::Float, torch::headeronly::ScalarType::Double,
+        torch::headeronly::ScalarType::Half, torch::headeronly::ScalarType::BFloat16);
 
     return output;
 }
@@ -220,12 +239,14 @@ Tensor morphology_impl(const Tensor& input, const Tensor& kernel, int64_t border
  * @param kernel        CUDA structuring element of shape (kH, kW), shared across channels, or (C, kH, kW) for a
  * per-channel element; same dtype as @p input.
  * @param border        Boundary mode (@ref BorderMode) applied at the image edges.
+ * @param algo          Algorithm to run (@ref Algorithm encoding); auto lets the library choose.
  * @return              Eroded tensor, same shape and dtype as @p input.
  * @throws std::runtime_error   if the tensors are not on CUDA, have the wrong rank or dtype, the channel counts
  * disagree, or @p border is out of range.
  */
-Tensor erode(const Tensor& input, const Tensor& kernel, const int64_t border, const std::optional<bool>& flat) {
-    return morphology_impl(input, kernel, border, flat, MorphOp::kErode, "serron::erode");
+Tensor erode(const Tensor& input, const Tensor& kernel, const int64_t border, const std::optional<bool>& flat,
+             const int64_t algo) {
+    return morphology_impl(input, kernel, border, flat, algo, MorphOp::kErode, "serron::erode");
 }
 
 /**
@@ -235,12 +256,14 @@ Tensor erode(const Tensor& input, const Tensor& kernel, const int64_t border, co
  * @param kernel        CUDA structuring element of shape (kH, kW), shared across channels, or (C, kH, kW) for a
  * per-channel element; same dtype as @p input.
  * @param border        Boundary mode (@ref BorderMode) applied at the image edges.
+ * @param algo          Algorithm to run (@ref Algorithm encoding); auto lets the library choose.
  * @return              Dilated tensor, same shape and dtype as @p input.
  * @throws std::runtime_error   if the tensors are not on CUDA, have the wrong rank or dtype, the channel counts
  * disagree, or @p border is out of range.
  */
-Tensor dilate(const Tensor& input, const Tensor& kernel, const int64_t border, const std::optional<bool>& flat) {
-    return morphology_impl(input, kernel, border, flat, MorphOp::kDilate, "serron::dilate");
+Tensor dilate(const Tensor& input, const Tensor& kernel, const int64_t border, const std::optional<bool>& flat,
+              const int64_t algo) {
+    return morphology_impl(input, kernel, border, flat, algo, MorphOp::kDilate, "serron::dilate");
 }
 
 } // namespace serron

@@ -336,8 +336,10 @@ void morphology_backward_cpu_for(const MorphOp op, const scalar_t* grad_output, 
  */
 std::tuple<Tensor, Tensor> morphology_backward_impl(const Tensor& grad_output, const Tensor& input,
                                                     const Tensor& kernel, int64_t border,
-                                                    const std::optional<bool>& flat, bool need_kernel_grad, MorphOp op,
-                                                    const char* name) {
+                                                    const std::optional<bool>& flat, bool need_kernel_grad,
+                                                    int64_t algo, MorphOp op, const char* name) {
+    SERRON_CHECK(parse_algorithm(algo, name) == Algorithm::kAuto, name,
+                 ": the CPU operators pick their own algorithm, algo must be auto");
     SERRON_CHECK(grad_output.is_cpu(), name, ": grad_output must be a CPU tensor");
     SERRON_CHECK(input.is_cpu(), name, ": input must be a CPU tensor");
     SERRON_CHECK(kernel.is_cpu(), name, ": kernel must be a CPU tensor");
@@ -409,8 +411,8 @@ std::tuple<Tensor, Tensor> morphology_backward_impl(const Tensor& grad_output, c
  */
 std::tuple<Tensor, Tensor> erode_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& kernel,
                                               const int64_t border, const std::optional<bool>& flat,
-                                              const bool need_kernel_grad) {
-    return morphology_backward_impl(grad_output, input, kernel, border, flat, need_kernel_grad, MorphOp::kErode,
+                                              const bool need_kernel_grad, const int64_t algo) {
+    return morphology_backward_impl(grad_output, input, kernel, border, flat, need_kernel_grad, algo, MorphOp::kErode,
                                     "serron::erode_backward");
 }
 
@@ -425,8 +427,8 @@ std::tuple<Tensor, Tensor> erode_backward_cpu(const Tensor& grad_output, const T
  */
 std::tuple<Tensor, Tensor> dilate_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& kernel,
                                                const int64_t border, const std::optional<bool>& flat,
-                                               const bool need_kernel_grad) {
-    return morphology_backward_impl(grad_output, input, kernel, border, flat, need_kernel_grad, MorphOp::kDilate,
+                                               const bool need_kernel_grad, const int64_t algo) {
+    return morphology_backward_impl(grad_output, input, kernel, border, flat, need_kernel_grad, algo, MorphOp::kDilate,
                                     "serron::dilate_backward");
 }
 

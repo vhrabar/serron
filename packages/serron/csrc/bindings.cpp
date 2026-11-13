@@ -5,12 +5,18 @@
 
 // Operator schemas, registered under the serron:: namespace.
 TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
-    ops.def("erode(Tensor input, Tensor kernel, int border, bool? flat=None) -> Tensor");
-    ops.def("dilate(Tensor input, Tensor kernel, int border, bool? flat=None) -> Tensor");
+    ops.def("erode(Tensor input, Tensor kernel, int border, bool? flat=None, int algo=0) -> Tensor");
+    ops.def("dilate(Tensor input, Tensor kernel, int border, bool? flat=None, int algo=0) -> Tensor");
     ops.def("erode_backward(Tensor grad_output, Tensor input, Tensor kernel, int border, bool? flat=None, "
-            "bool need_kernel_grad=True) -> (Tensor, Tensor)");
+            "bool need_kernel_grad=True, int algo=0) -> (Tensor, Tensor)");
     ops.def("dilate_backward(Tensor grad_output, Tensor input, Tensor kernel, int border, bool? flat=None, "
-            "bool need_kernel_grad=True) -> (Tensor, Tensor)");
+            "bool need_kernel_grad=True, int algo=0) -> (Tensor, Tensor)");
+
+    // Algorithm selection, for the autotuner. CUDA only.
+    ops.def("feasible_algos(Tensor input, Tensor kernel, bool? flat=None, bool backward=False) -> int");
+    ops.def("heuristic_algo(Tensor input, Tensor kernel, bool? flat=None, bool backward=False) -> int");
+    ops.def("set_separable_min_k(Tensor like, bool backward, int min_k) -> int");
+    ops.def("get_separable_min_k(Tensor like, bool backward) -> int");
 }
 
 // CPU implementation
