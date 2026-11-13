@@ -42,10 +42,10 @@ namespace {
 template <typename scalar_t, typename Op>
 __device__ __forceinline__ void
 morphology_backward_kernel(const scalar_t* __restrict__ grad_output, const scalar_t* __restrict__ input,
-                           const scalar_t* __restrict__ kernel, scalar_t* __restrict__ grad_input,
-                           scalar_t* __restrict__ grad_kernel, const int64_t N, const int64_t C, const int64_t H,
-                           const int64_t W, const int64_t kH, const int64_t kW, const int64_t kernel_channel_stride,
-                           const BorderMode border, const bool need_kernel_grad) {
+                           const scalar_t* __restrict__ kernel, acc_type<scalar_t, true>* __restrict__ grad_input,
+                           acc_type<scalar_t, true>* __restrict__ grad_kernel, const int64_t N, const int64_t C,
+                           const int64_t H, const int64_t W, const int64_t kH, const int64_t kW,
+                           const int64_t kernel_channel_stride, const BorderMode border, const bool need_kernel_grad) {
     using acc_t = acc_type<scalar_t, true>;
 
     const int64_t idx = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
@@ -62,8 +62,8 @@ morphology_backward_kernel(const scalar_t* __restrict__ grad_output, const scala
 
     const scalar_t* input_nc = input + (n * C + c) * H * W;
     const scalar_t* kernel_c = kernel + c * kernel_channel_stride;
-    scalar_t* grad_input_nc = grad_input + (n * C + c) * H * W;
-    scalar_t* grad_kernel_c = grad_kernel + c * kernel_channel_stride;
+    acc_t* grad_input_nc = grad_input + (n * C + c) * H * W;
+    acc_t* grad_kernel_c = grad_kernel + c * kernel_channel_stride;
 
     const auto neutral = Op::template neutral<acc_t>();
 
@@ -95,9 +95,9 @@ morphology_backward_kernel(const scalar_t* __restrict__ grad_output, const scala
 
     // The centre tap (di=anchor_h, dj=anchor_w) always resolves in-image, so a winner is guaranteed.
     const acc_t go = static_cast<acc_t>(grad_output[idx]);
-    atomic_add(&grad_input_nc[best_in], static_cast<scalar_t>(go));
+    atomic_add(&grad_input_nc[best_in], go);
     if (need_kernel_grad) {
-        atomic_add(&grad_kernel_c[best_k], static_cast<scalar_t>(Op::template se_grad_sign<acc_t>() * go));
+        atomic_add(&grad_kernel_c[best_k], Op::template se_grad_sign<acc_t>() * go);
     }
 }
 
@@ -128,12 +128,11 @@ morphology_backward_kernel(const scalar_t* __restrict__ grad_output, const scala
  * @param need_kernel_grad       Whether grad_kernel is wanted; when false its scatter is skipped.
  */
 template <typename scalar_t, typename Op>
-__device__ __forceinline__ void
-morphology_backward_tiled_kernel(const scalar_t* __restrict__ grad_output, const scalar_t* __restrict__ input,
-                                 const scalar_t* __restrict__ kernel, scalar_t* __restrict__ grad_input,
-                                 scalar_t* __restrict__ grad_kernel, const int64_t C, const int64_t H, const int64_t W,
-                                 const int64_t kH, const int64_t kW, const int64_t kernel_channel_stride,
-                                 const BorderMode border, const bool need_kernel_grad) {
+__device__ __forceinline__ void morphology_backward_tiled_kernel(
+    const scalar_t* __restrict__ grad_output, const scalar_t* __restrict__ input, const scalar_t* __restrict__ kernel,
+    acc_type<scalar_t, true>* __restrict__ grad_input, acc_type<scalar_t, true>* __restrict__ grad_kernel,
+    const int64_t C, const int64_t H, const int64_t W, const int64_t kH, const int64_t kW,
+    const int64_t kernel_channel_stride, const BorderMode border, const bool need_kernel_grad) {
     using acc_t = acc_type<scalar_t, true>;
 
     const int64_t anchor_h = kH / 2;
@@ -210,10 +209,10 @@ morphology_backward_tiled_kernel(const scalar_t* __restrict__ grad_output, const
         return;
 
     const acc_t go = static_cast<acc_t>(grad_output[nc * H * W + h * W + w]);
-    atomic_add(&grad_input[nc * H * W + ih * W + iw], static_cast<scalar_t>(go));
+    atomic_add(&grad_input[nc * H * W + ih * W + iw], go);
     if (need_kernel_grad) {
-        scalar_t* grad_kernel_c = grad_kernel + c * kernel_channel_stride;
-        atomic_add(&grad_kernel_c[best_k], static_cast<scalar_t>(Op::template se_grad_sign<acc_t>() * go));
+        acc_t* grad_kernel_c = grad_kernel + c * kernel_channel_stride;
+        atomic_add(&grad_kernel_c[best_k], Op::template se_grad_sign<acc_t>() * go);
     }
 }
 
@@ -362,9 +361,10 @@ morphology_row_argreduce_kernel(const scalar_t* __restrict__ input, scalar_t* __
 template <typename scalar_t, typename Op>
 __device__ __forceinline__ void morphology_col_argreduce_kernel(
     const scalar_t* __restrict__ row_best_val, const cuda::std::int32_t* __restrict__ row_best_dj,
-    const scalar_t* __restrict__ grad_output, scalar_t* __restrict__ grad_input, scalar_t* __restrict__ grad_kernel,
-    const int64_t C, const int64_t H, const int64_t W, const int64_t kH, const int64_t kW, const int64_t chunks,
-    const int64_t kernel_channel_stride, const BorderMode border, const bool need_kernel_grad) {
+    const scalar_t* __restrict__ grad_output, acc_type<scalar_t, true>* __restrict__ grad_input,
+    acc_type<scalar_t, true>* __restrict__ grad_kernel, const int64_t C, const int64_t H, const int64_t W,
+    const int64_t kH, const int64_t kW, const int64_t chunks, const int64_t kernel_channel_stride,
+    const BorderMode border, const bool need_kernel_grad) {
     using acc_t = acc_type<scalar_t, true>;
 
     const int64_t tile_len = chunks * kH;
@@ -388,7 +388,7 @@ __device__ __forceinline__ void morphology_col_argreduce_kernel(
     run_arg_scans<Op, acc_t>(s_forward, s_backward, kH, chunks);
     __syncthreads();
 
-    scalar_t* grad_kernel_c = grad_kernel + c * kernel_channel_stride;
+    acc_t* grad_kernel_c = grad_kernel + c * kernel_channel_stride;
 
     for (int64_t i = threadIdx.x; i < out_count; i += LINE_TILE) {
         const int64_t h = tile0 + i;
@@ -410,10 +410,9 @@ __device__ __forceinline__ void morphology_col_argreduce_kernel(
         resolve_coord(iw, W, border);
 
         const acc_t go = static_cast<acc_t>(grad_output[plane + h * W + w]);
-        atomic_add(&grad_input[plane + best_ih * W + iw], static_cast<scalar_t>(go));
+        atomic_add(&grad_input[plane + best_ih * W + iw], go);
         if (need_kernel_grad) {
-            atomic_add(&grad_kernel_c[best_di * kW + dj],
-                       static_cast<scalar_t>(Op::template se_grad_sign<acc_t>() * go));
+            atomic_add(&grad_kernel_c[best_di * kW + dj], Op::template se_grad_sign<acc_t>() * go);
         }
     }
 }
@@ -424,17 +423,19 @@ __device__ __forceinline__ void morphology_col_argreduce_kernel(
 #define SERRON_BACKWARD_ENTRY_POINTS(Op, op, scalar_t, suffix)                                                         \
     extern "C" __global__ void serron_morphology_backward_##op##_##suffix(                                             \
         const scalar_t* __restrict__ grad_output, const scalar_t* __restrict__ input,                                  \
-        const scalar_t* __restrict__ kernel, scalar_t* __restrict__ grad_input, scalar_t* __restrict__ grad_kernel,    \
-        const int64_t N, const int64_t C, const int64_t H, const int64_t W, const int64_t kH, const int64_t kW,        \
-        const int64_t kernel_channel_stride, const BorderMode border, const bool need_kernel_grad) {                   \
+        const scalar_t* __restrict__ kernel, acc_type<scalar_t, true>* __restrict__ grad_input,                        \
+        acc_type<scalar_t, true>* __restrict__ grad_kernel, const int64_t N, const int64_t C, const int64_t H,         \
+        const int64_t W, const int64_t kH, const int64_t kW, const int64_t kernel_channel_stride,                      \
+        const BorderMode border, const bool need_kernel_grad) {                                                        \
         morphology_backward_kernel<scalar_t, Op>(grad_output, input, kernel, grad_input, grad_kernel, N, C, H, W, kH,  \
                                                  kW, kernel_channel_stride, border, need_kernel_grad);                 \
     }                                                                                                                  \
     extern "C" __global__ void serron_morphology_backward_tiled_##op##_##suffix(                                       \
         const scalar_t* __restrict__ grad_output, const scalar_t* __restrict__ input,                                  \
-        const scalar_t* __restrict__ kernel, scalar_t* __restrict__ grad_input, scalar_t* __restrict__ grad_kernel,    \
-        const int64_t C, const int64_t H, const int64_t W, const int64_t kH, const int64_t kW,                         \
-        const int64_t kernel_channel_stride, const BorderMode border, const bool need_kernel_grad) {                   \
+        const scalar_t* __restrict__ kernel, acc_type<scalar_t, true>* __restrict__ grad_input,                        \
+        acc_type<scalar_t, true>* __restrict__ grad_kernel, const int64_t C, const int64_t H, const int64_t W,         \
+        const int64_t kH, const int64_t kW, const int64_t kernel_channel_stride, const BorderMode border,              \
+        const bool need_kernel_grad) {                                                                                 \
         morphology_backward_tiled_kernel<scalar_t, Op>(grad_output, input, kernel, grad_input, grad_kernel, C, H, W,   \
                                                        kH, kW, kernel_channel_stride, border, need_kernel_grad);       \
     }                                                                                                                  \
@@ -446,10 +447,10 @@ __device__ __forceinline__ void morphology_col_argreduce_kernel(
     }                                                                                                                  \
     extern "C" __global__ void serron_morphology_col_argreduce_##op##_##suffix(                                        \
         const scalar_t* __restrict__ row_best_val, const cuda::std::int32_t* __restrict__ row_best_dj,                 \
-        const scalar_t* __restrict__ grad_output, scalar_t* __restrict__ grad_input,                                   \
-        scalar_t* __restrict__ grad_kernel, const int64_t C, const int64_t H, const int64_t W, const int64_t kH,       \
-        const int64_t kW, const int64_t chunks, const int64_t kernel_channel_stride, const BorderMode border,          \
-        const bool need_kernel_grad) {                                                                                 \
+        const scalar_t* __restrict__ grad_output, acc_type<scalar_t, true>* __restrict__ grad_input,                   \
+        acc_type<scalar_t, true>* __restrict__ grad_kernel, const int64_t C, const int64_t H, const int64_t W,         \
+        const int64_t kH, const int64_t kW, const int64_t chunks, const int64_t kernel_channel_stride,                 \
+        const BorderMode border, const bool need_kernel_grad) {                                                        \
         morphology_col_argreduce_kernel<scalar_t, Op>(row_best_val, row_best_dj, grad_output, grad_input, grad_kernel, \
                                                       C, H, W, kH, kW, chunks, kernel_channel_stride, border,          \
                                                       need_kernel_grad);                                               \

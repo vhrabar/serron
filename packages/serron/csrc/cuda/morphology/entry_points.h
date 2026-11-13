@@ -4,6 +4,7 @@
 #include <cuda/morphology/enums.h>
 #include <cuda/utils/border_mode.h>
 
+#include <compat/acc_type.h>
 #include <torch/headeronly/util/BFloat16.h>
 #include <torch/headeronly/util/Half.h>
 
@@ -102,16 +103,18 @@ using ForwardLineFn = void(const scalar_t*, scalar_t*, int64_t, int64_t, int64_t
  * kernel_channel_stride, border, need_kernel_grad.
  */
 template <typename scalar_t>
-using BackwardElementFn = void(const scalar_t*, const scalar_t*, const scalar_t*, scalar_t*, scalar_t*, int64_t,
-                               int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, BorderMode, bool);
+using BackwardElementFn = void(const scalar_t*, const scalar_t*, const scalar_t*, acc_type<scalar_t, true>*,
+                               acc_type<scalar_t, true>*, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+                               BorderMode, bool);
 
 /**
  * @c morphology_backward_tiled_kernel: grad_output, input, kernel, grad_input, grad_kernel, C, H, W, kH, kW,
  * kernel_channel_stride, border, need_kernel_grad.
  */
 template <typename scalar_t>
-using BackwardTiledFn = void(const scalar_t*, const scalar_t*, const scalar_t*, scalar_t*, scalar_t*, int64_t, int64_t,
-                             int64_t, int64_t, int64_t, int64_t, BorderMode, bool);
+using BackwardTiledFn = void(const scalar_t*, const scalar_t*, const scalar_t*, acc_type<scalar_t, true>*,
+                             acc_type<scalar_t, true>*, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+                             BorderMode, bool);
 
 /// @c morphology_row_argreduce_kernel: input, row_best_val, row_best_dj, H, W, kW, chunks, border.
 template <typename scalar_t>
@@ -123,8 +126,9 @@ using BackwardRowArgreduceFn = void(const scalar_t*, scalar_t*, std::int32_t*, i
  * kW, chunks, kernel_channel_stride, border, need_kernel_grad.
  */
 template <typename scalar_t>
-using BackwardColArgreduceFn = void(const scalar_t*, const std::int32_t*, const scalar_t*, scalar_t*, scalar_t*,
-                                    int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, BorderMode, bool);
+using BackwardColArgreduceFn = void(const scalar_t*, const std::int32_t*, const scalar_t*, acc_type<scalar_t, true>*,
+                                    acc_type<scalar_t, true>*, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
+                                    int64_t, BorderMode, bool);
 
 } // namespace serron
 

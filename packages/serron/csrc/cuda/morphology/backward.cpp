@@ -64,10 +64,11 @@ SERRON_CUDA_FOR_EACH_DTYPE(SERRON_BACKWARD_TABLE)
  */
 template <typename scalar_t>
 bool launch_morphology_backward_separable(const BackwardKernels<scalar_t>& kernels, const scalar_t* input,
-                                          const scalar_t* grad_output, scalar_t* grad_input, scalar_t* grad_kernel,
-                                          scalar_t* row_best_val, int32_t* row_best_dj, int64_t N, int64_t C, int64_t H,
-                                          int64_t W, int64_t kH, int64_t kW, int64_t kernel_channel_stride,
-                                          BorderMode border, bool need_kernel_grad, CUstream stream) {
+                                          const scalar_t* grad_output, acc_type<scalar_t, true>* grad_input,
+                                          acc_type<scalar_t, true>* grad_kernel, scalar_t* row_best_val,
+                                          int32_t* row_best_dj, int64_t N, int64_t C, int64_t H, int64_t W, int64_t kH,
+                                          int64_t kW, int64_t kernel_channel_stride, BorderMode border,
+                                          bool need_kernel_grad, CUstream stream) {
     constexpr size_t kTap = backward_line_elem_size<scalar_t>();
 
     const Dim3 block(LINE_TILE);
@@ -108,8 +109,8 @@ bool launch_morphology_backward_separable(const BackwardKernels<scalar_t>& kerne
  */
 template <typename scalar_t>
 void launch_morphology_backward(const BackwardKernels<scalar_t>& kernels, const scalar_t* grad_output,
-                                const scalar_t* input, const scalar_t* kernel, scalar_t* grad_input,
-                                scalar_t* grad_kernel, scalar_t* row_best_val, int32_t* row_best_dj,
+                                const scalar_t* input, const scalar_t* kernel, acc_type<scalar_t, true>* grad_input,
+                                acc_type<scalar_t, true>* grad_kernel, scalar_t* row_best_val, int32_t* row_best_dj,
                                 Algorithm algorithm, bool may_fall_back, int64_t N, int64_t C, int64_t H, int64_t W,
                                 int64_t kH, int64_t kW, int64_t kernel_channel_stride, BorderMode border,
                                 bool need_kernel_grad, CUstream stream) {
@@ -201,10 +202,17 @@ std::tuple<Tensor, Tensor> morphology_backward_impl(const Tensor& grad_output, c
     SERRON_CHECK(kH > 0 && kW > 0, name, ": kernel spatial dims must be positive");
     SERRON_CHECK(grad_output_c.sizes() == input_c.sizes(), name, ": grad_output shape must match input");
 
-    Tensor grad_input = torch::stable::new_zeros(input_c, input_c.sizes());
-    Tensor grad_kernel = torch::stable::new_zeros(kernel_c, kernel_c.sizes());
+    // The kernels scatter into buffers of the accumulate type: a half atomic add is far slower than a float one, and
+    // rounding once at the end beats rounding at every add. For float and double the buffers are the outputs.
+    const auto stored_type = input_c.scalar_type();
+    const bool widen =
+        stored_type == torch::headeronly::ScalarType::Half || stored_type == torch::headeronly::ScalarType::BFloat16;
+    const auto accum_type = widen ? torch::headeronly::ScalarType::Float : stored_type;
+    Tensor grad_input = torch::stable::new_zeros(input_c, input_c.sizes(), accum_type);
+    Tensor grad_kernel = torch::stable::new_zeros(kernel_c, kernel_c.sizes(), accum_type);
     if (input_c.numel() == 0)
-        return {grad_input, grad_kernel};
+        return {widen ? torch::stable::to(grad_input, stored_type) : grad_input,
+                widen ? torch::stable::to(grad_kernel, stored_type) : grad_kernel};
 
     // A forced tiled or element-wise launch never reads the flatness, so it skips the read-back from the device.
     const bool is_flat = algorithm_needs_flatness(requested) && resolve_flat(flat, kernel_c);
@@ -233,13 +241,17 @@ std::tuple<Tensor, Tensor> morphology_backward_impl(const Tensor& grad_output, c
                         launch_morphology_backward<scalar_t>(
                             backward_kernels<scalar_t>(op), grad_output_c.const_data_ptr<scalar_t>(),
                             input_c.const_data_ptr<scalar_t>(), kernel_c.const_data_ptr<scalar_t>(),
-                            grad_input.mutable_data_ptr<scalar_t>(), grad_kernel.mutable_data_ptr<scalar_t>(),
-                            row_val_ptr, row_dj_ptr, algorithm, requested == Algorithm::kAuto, N, C, H, W, kH, kW,
-                            kernel_channel_stride, border_mode, need_kernel_grad, stream);
+                            grad_input.mutable_data_ptr<acc_type<scalar_t, true>>(),
+                            grad_kernel.mutable_data_ptr<acc_type<scalar_t, true>>(), row_val_ptr, row_dj_ptr,
+                            algorithm, requested == Algorithm::kAuto, N, C, H, W, kH, kW, kernel_channel_stride,
+                            border_mode, need_kernel_grad, stream);
                     }),
                     torch::headeronly::ScalarType::Float, torch::headeronly::ScalarType::Double,
                     torch::headeronly::ScalarType::Half, torch::headeronly::ScalarType::BFloat16);
 
+    if (widen) {
+        return {torch::stable::to(grad_input, stored_type), torch::stable::to(grad_kernel, stored_type)};
+    }
     return {grad_input, grad_kernel};
 }
 
