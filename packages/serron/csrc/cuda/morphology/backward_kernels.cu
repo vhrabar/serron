@@ -3,8 +3,7 @@
 #include <cuda/morphology/scan.cuh>
 #include <cuda/utils/boundaries.cuh>
 #include <cuda/utils/declarations.h>
-
-#include <cuda_runtime.h>
+#include <cuda/utils/device_runtime.h>
 
 #include <compat/acc_type.h>
 #include <compat/atomic.cuh>
@@ -245,7 +244,7 @@ __device__ __forceinline__ void stage_arg_tile(ArgTap<acc_t>* s_forward, ArgTap<
         int64_t pos = tile0 + t - anchor;
         ArgTap<acc_t> tap{};
         tap.val = resolve_coord(pos, line_len, border) ? static_cast<acc_t>(base[pos * stride]) : neutral;
-        tap.idx = static_cast<cuda::std::int32_t>(t);
+        tap.idx = static_cast<std::int32_t>(t);
         s_forward[t] = tap;
         s_backward[t] = tap;
     }
@@ -300,7 +299,7 @@ __device__ __forceinline__ void run_arg_scans(ArgTap<acc_t>* s_forward, ArgTap<a
 template <typename scalar_t, typename Op>
 __device__ __forceinline__ void
 morphology_row_argreduce_kernel(const scalar_t* __restrict__ input, scalar_t* __restrict__ row_best_val,
-                                cuda::std::int32_t* __restrict__ row_best_dj, const int64_t H, const int64_t W,
+                                std::int32_t* __restrict__ row_best_dj, const int64_t H, const int64_t W,
                                 const int64_t kW, const int64_t chunks, const BorderMode border) {
     using acc_t = acc_type<scalar_t, true>;
 
@@ -329,7 +328,7 @@ morphology_row_argreduce_kernel(const scalar_t* __restrict__ input, scalar_t* __
 
         const ArgTap<acc_t> tap = arg_combine<Op>(s_backward[i], s_forward[i + kW - 1]);
         row_best_val[plane + h * W + w] = static_cast<scalar_t>(tap.val);
-        row_best_dj[plane + h * W + w] = static_cast<cuda::std::int32_t>(tap.idx - i);
+        row_best_dj[plane + h * W + w] = static_cast<std::int32_t>(tap.idx - i);
     }
 }
 
@@ -360,7 +359,7 @@ morphology_row_argreduce_kernel(const scalar_t* __restrict__ input, scalar_t* __
  */
 template <typename scalar_t, typename Op>
 __device__ __forceinline__ void morphology_col_argreduce_kernel(
-    const scalar_t* __restrict__ row_best_val, const cuda::std::int32_t* __restrict__ row_best_dj,
+    const scalar_t* __restrict__ row_best_val, const std::int32_t* __restrict__ row_best_dj,
     const scalar_t* __restrict__ grad_output, acc_type<scalar_t, true>* __restrict__ grad_input,
     acc_type<scalar_t, true>* __restrict__ grad_kernel, const int64_t C, const int64_t H, const int64_t W,
     const int64_t kH, const int64_t kW, const int64_t chunks, const int64_t kernel_channel_stride,
@@ -405,7 +404,7 @@ __device__ __forceinline__ void morphology_col_argreduce_kernel(
         if (!resolve_coord(best_ih, H, border))
             continue;
 
-        const cuda::std::int32_t dj = row_best_dj[plane + best_ih * W + w];
+        const std::int32_t dj = row_best_dj[plane + best_ih * W + w];
         int64_t iw = w + dj - anchor_w;
         resolve_coord(iw, W, border);
 
@@ -441,12 +440,12 @@ __device__ __forceinline__ void morphology_col_argreduce_kernel(
     }                                                                                                                  \
     extern "C" __global__ void serron_morphology_row_argreduce_##op##_##suffix(                                        \
         const scalar_t* __restrict__ input, scalar_t* __restrict__ row_best_val,                                       \
-        cuda::std::int32_t* __restrict__ row_best_dj, const int64_t H, const int64_t W, const int64_t kW,              \
+        std::int32_t* __restrict__ row_best_dj, const int64_t H, const int64_t W, const int64_t kW,                    \
         const int64_t chunks, const BorderMode border) {                                                               \
         morphology_row_argreduce_kernel<scalar_t, Op>(input, row_best_val, row_best_dj, H, W, kW, chunks, border);     \
     }                                                                                                                  \
     extern "C" __global__ void serron_morphology_col_argreduce_##op##_##suffix(                                        \
-        const scalar_t* __restrict__ row_best_val, const cuda::std::int32_t* __restrict__ row_best_dj,                 \
+        const scalar_t* __restrict__ row_best_val, const std::int32_t* __restrict__ row_best_dj,                       \
         const scalar_t* __restrict__ grad_output, acc_type<scalar_t, true>* __restrict__ grad_input,                   \
         acc_type<scalar_t, true>* __restrict__ grad_kernel, const int64_t C, const int64_t H, const int64_t W,         \
         const int64_t kH, const int64_t kW, const int64_t chunks, const int64_t kernel_channel_stride,                 \

@@ -2,10 +2,8 @@
 #define SERRON_MORPHOLOGY_SCAN_CUH
 
 #include <cuda/morphology/arg_tap.h>
-#include <cuda/std/cstdint>
 #include <cuda/utils/declarations.h>
-
-#include <cuda_runtime.h>
+#include <cuda/utils/device_runtime.h>
 
 #include <compat/acc_type.h>
 

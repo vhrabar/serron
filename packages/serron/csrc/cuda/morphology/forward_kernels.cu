@@ -3,8 +3,7 @@
 #include <cuda/morphology/scan.cuh>
 #include <cuda/utils/boundaries.cuh>
 #include <cuda/utils/declarations.h>
-
-#include <cuda_runtime.h>
+#include <cuda/utils/device_runtime.h>
 
 #include <compat/acc_type.h>
 

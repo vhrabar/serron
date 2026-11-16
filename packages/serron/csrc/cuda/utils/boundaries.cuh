@@ -1,10 +1,10 @@
 #ifndef SERRON_BOUNDARIES_CUH
 #define SERRON_BOUNDARIES_CUH
 
-#include <cuda/std/cstdint>
 #include <cuda/utils/border_mode.h>
+#include <cuda/utils/device_runtime.h>
 
-#include <cuda_runtime.h>
+#include <cstdint>
 
 /**
  * Map a possibly out-of-range coordinate back into [0, size) per @p border.
@@ -15,7 +15,7 @@
  * @return       true if @p coord now holds a valid in-range index; false for @ref kConstant when the coordinate lies
  * outside the image.
  */
-__device__ __forceinline__ bool resolve_coord(cuda::std::int64_t& coord, const int64_t size, const BorderMode border) {
+__device__ __forceinline__ bool resolve_coord(std::int64_t& coord, const int64_t size, const BorderMode border) {
     if (coord >= 0 && coord < size)
         return true;
 

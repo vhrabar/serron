@@ -190,6 +190,7 @@ if(SERRON_CUDA)
             csrc/cuda/utils/border_mode.h
             csrc/cuda/utils/boundaries.cuh
             csrc/cuda/utils/declarations.h
+            csrc/cuda/utils/device_runtime.h
             csrc/cuda/utils/driver.h
             csrc/cuda/utils/launch.h
             csrc/cuda/utils/smem.h
