@@ -232,13 +232,13 @@ cd serron
 
 `torch` is pulled from a specific wheel index via mutually-exclusive dependency groups,
 one per backend and end of the supported range: `cu132` / `cpu` at the oldest torch the
-kernels target, `cu132-newest` / `cpu-newest` at the current release. `cu132-newest` is
-enabled by default, so plain `uv sync` gives the CUDA 13.2 build against the newest torch.
-Because the groups conflict, selecting another one means turning the default off, which
-`--no-default-groups` does in one step:
+kernels target, `cu132-newest` / `cpu-newest` at the current release. Only `dev` is enabled
+by default, so a torch group is always chosen explicitly. `cu134` (x86_64 and AMD64) and the
+`rocm-<arch>` groups (Linux x86_64, one per GPU architecture) follow the same rule.
+`--no-default-groups` keeps the command independent of whatever is enabled by default:
 
 ```bash
-uv sync                                                   # CUDA, newest torch
+uv sync --no-default-groups --group dev --group cu132-newest # CUDA, newest torch
 uv sync --no-default-groups --group dev --group cpu-newest # CPU-only, newest torch
 uv sync --no-default-groups --group dev --group cu132      # CUDA, oldest supported torch
 uv sync --no-default-groups --group dev --group cpu        # CPU-only, oldest supported torch
@@ -250,6 +250,9 @@ On Windows on ARM, the `cu134-win-arm64` group pulls NVIDIA's `+cu134` torch whe
 ```bash
 uv sync --no-default-groups --group dev --group cu134-win-arm64 # Windows on ARM, CUDA 13.4
 ```
+
+On Linux x86_64, AMD GPUs use `rocm-<arch code>` groups: `rocm-gfx90a`, `rocm-gfx942`, `rocm-gfx950`,
+`rocm-gfx1036`, `rocm-gfx1100`, `rocm-gfx1201`.
 
 ### Building the wheel
 
