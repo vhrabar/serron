@@ -28,10 +28,23 @@ _OPS = ["erode", "dilate"]
 _DIRECT = [Algorithm.ELEMENT, Algorithm.TILED]
 _BORDER = 0
 _SEPARABLE_K = 21
+# The line kernels scan a chunk with one thread below the warp size (32) and with a warp's shuffles from there up, so
+# these straddle the two paths and run one and two warps' worth of lanes.
+_WARP_SCAN_KS = [31, 32, 33, 63, 64, 65]
 
 
 def _forward(op: str, x: torch.Tensor, kernel: torch.Tensor, algo: Algorithm) -> torch.Tensor:
     return getattr(ops, op)(x, kernel, _BORDER, True, int(algo))
+
+
+def _grads(op: str, x: torch.Tensor, kernel: torch.Tensor, algo: Algorithm) -> tuple[torch.Tensor, torch.Tensor]:
+    function = _ErodeFunction if op == "erode" else _DilateFunction
+    xi = x.clone().requires_grad_()
+    ki = kernel.clone().requires_grad_()
+    function.apply(xi, ki, _BORDER, int(algo)).sum().backward()
+    assert xi.grad is not None
+    assert ki.grad is not None
+    return xi.grad, ki.grad
 
 
 @requires_cuda
@@ -50,24 +63,40 @@ def test_forced_algorithms_are_bitwise_equal_forward(op: str, k: int, rng: torch
 @requires_cuda
 @pytest.mark.parametrize("op", _OPS)
 def test_forced_algorithms_agree_on_gradients(op: str, rng: torch.Generator) -> None:
-    function = _ErodeFunction if op == "erode" else _DilateFunction
     x = make_image(rng, (2, 3, 40, 37), device=torch.device("cuda"))
     kernel = flat_se(x.shape[1], _SEPARABLE_K, device=x.device, shared=False)
 
-    def grads(algo: Algorithm) -> tuple[torch.Tensor, torch.Tensor]:
-        xi = x.clone().requires_grad_()
-        ki = kernel.clone().requires_grad_()
-        function.apply(xi, ki, _BORDER, int(algo)).sum().backward()
-        assert xi.grad is not None
-        assert ki.grad is not None
-        return xi.grad, ki.grad
-
-    expected_x, expected_k = grads(Algorithm.AUTO)
+    expected_x, expected_k = _grads(op, x, kernel, Algorithm.AUTO)
     for algo in (*_DIRECT, Algorithm.SEPARABLE):
-        grad_x, grad_k = grads(algo)
+        grad_x, grad_k = _grads(op, x, kernel, algo)
         # The argmax tie-break is shared by every algorithm, so these are exact, not merely close.
         assert torch.equal(grad_x, expected_x), algo.name
         assert torch.equal(grad_k, expected_k), algo.name
+
+
+@requires_cuda
+@pytest.mark.parametrize("op", _OPS)
+@pytest.mark.parametrize("k", _WARP_SCAN_KS)
+def test_separable_matches_element_around_the_warp_size(op: str, k: int, rng: torch.Generator) -> None:
+    """The warp-shuffle scan only runs from k = 32; the other tests stay below it."""
+    x = make_image(rng, (2, 3, 96, 90), device=torch.device("cuda"))
+    kernel = flat_se(x.shape[1], k, device=x.device, shared=False)
+
+    assert torch.equal(_forward(op, x, kernel, Algorithm.SEPARABLE), _forward(op, x, kernel, Algorithm.ELEMENT))
+
+
+@requires_cuda
+@pytest.mark.parametrize("op", _OPS)
+@pytest.mark.parametrize("k", _WARP_SCAN_KS)
+def test_separable_gradients_match_element_around_the_warp_size(op: str, k: int, rng: torch.Generator) -> None:
+    x = make_image(rng, (2, 3, 96, 90), device=torch.device("cuda"))
+    kernel = flat_se(x.shape[1], k, device=x.device, shared=False)
+
+    expected_x, expected_k = _grads(op, x, kernel, Algorithm.ELEMENT)
+    grad_x, grad_k = _grads(op, x, kernel, Algorithm.SEPARABLE)
+
+    assert torch.equal(grad_x, expected_x)
+    assert torch.equal(grad_k, expected_k)
 
 
 @requires_cuda
