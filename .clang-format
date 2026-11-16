@@ -56,8 +56,8 @@ IncludeCategories:
   # 1. This project's own headers
   - Regex:    '^"'
     Priority: 1
-  # 2. Backend headers (csrc/cpu, csrc/cuda) and Thrust / CUB / libcu++
-  - Regex:    '^<(cpu|thrust|cub|cuda)/'
+  # 2. Backend headers (csrc/cpu, csrc/gpu, csrc/cuda, csrc/rocm) and Thrust / CUB / libcu++
+  - Regex:    '^<(cpu|gpu|rocm|thrust|cub|cuda)/'
     Priority: 2
   # 3. CUDA runtime / driver headers
   - Regex:    '^<(cooperative_groups|cuda\.h|cuda_runtime|cuda_runtime_api|device_types|math_constants|nvtx3)'

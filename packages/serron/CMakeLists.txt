@@ -193,6 +193,9 @@ if(SERRON_CUDA)
             csrc/cuda/utils/device_runtime.h
             csrc/cuda/utils/driver.h
             csrc/cuda/utils/launch.h
+            csrc/cuda/utils/shuffle.cuh
+            csrc/gpu/utils/shuffle.cuh
+            csrc/rocm/utils/shuffle.hip.h
             csrc/cuda/utils/smem.h
             csrc/cuda/morphology/arg_tap.h
             csrc/cuda/morphology/entry_points.h
