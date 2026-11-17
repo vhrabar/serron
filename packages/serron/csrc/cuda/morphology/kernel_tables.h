@@ -2,7 +2,7 @@
 #define SERRON_CUDA_MORPHOLOGY_KERNEL_TABLES_H
 
 #include <cuda/morphology/entry_points.h>
-#include <cuda/utils/launch.h>
+#include <gpu/utils/launch.h>
 
 /**
  * Host-side tables of the kernel handles for one (op, dtype), filled from the embedded fatbins by name.

@@ -9,11 +9,9 @@
 #include <cuda/morphology/thresholds.h>
 #include <cuda/utils/border_mode.h>
 #include <cuda/utils/declarations.h>
-#include <cuda/utils/driver.h>
-#include <cuda/utils/launch.h>
-#include <cuda/utils/smem.h>
-
-#include <cuda.h>
+#include <gpu/utils/backend.h>
+#include <gpu/utils/launch.h>
+#include <gpu/utils/smem.h>
 
 #include <backward_fatbin.h>
 #include <compat/acc_type.h>
@@ -34,8 +32,8 @@ namespace serron {
 namespace {
 
 /// The backward kernels' fatbin, embedded at build time and loaded on first use.
-CUlibrary backward_library() {
-    static const CUlibrary library = load_kernel_library(serron_backward_fatbin, "backward");
+Library backward_library() {
+    static const Library library = load_kernel_library(serron_backward_fatbin, "backward");
     return library;
 }
 
@@ -49,7 +47,7 @@ const BackwardKernels<scalar_t>& backward_kernels(MorphOp op);
     template <>                                                                                                        \
     const BackwardKernels<scalar_t>& backward_kernels<scalar_t>(const MorphOp op) {                                    \
         static const std::array<BackwardKernels<scalar_t>, 2> table = [] {                                             \
-            const CUlibrary library = backward_library();                                                              \
+            const Library library = backward_library();                                                                \
             return std::array<BackwardKernels<scalar_t>, 2>{                                                           \
                 SERRON_CUDA_FOR_EACH_OP(SERRON_BACKWARD_TABLE_ROW, scalar_t, suffix)};                                 \
         }();                                                                                                           \
@@ -68,7 +66,7 @@ bool launch_morphology_backward_separable(const BackwardKernels<scalar_t>& kerne
                                           acc_type<scalar_t, true>* grad_kernel, scalar_t* row_best_val,
                                           int32_t* row_best_dj, int64_t N, int64_t C, int64_t H, int64_t W, int64_t kH,
                                           int64_t kW, int64_t kernel_channel_stride, BorderMode border,
-                                          bool need_kernel_grad, CUstream stream) {
+                                          bool need_kernel_grad, Stream stream) {
     constexpr size_t kTap = backward_line_elem_size<scalar_t>();
 
     const Dim3 block(LINE_TILE);
@@ -113,7 +111,7 @@ void launch_morphology_backward(const BackwardKernels<scalar_t>& kernels, const 
                                 acc_type<scalar_t, true>* grad_kernel, scalar_t* row_best_val, int32_t* row_best_dj,
                                 Algorithm algorithm, bool may_fall_back, int64_t N, int64_t C, int64_t H, int64_t W,
                                 int64_t kH, int64_t kW, int64_t kernel_channel_stride, BorderMode border,
-                                bool need_kernel_grad, CUstream stream) {
+                                bool need_kernel_grad, Stream stream) {
     const size_t budget = smem_budget();
 
     if (algorithm == Algorithm::kSeparable) {
@@ -218,9 +216,8 @@ std::tuple<Tensor, Tensor> morphology_backward_impl(const Tensor& grad_output, c
     const bool is_flat = algorithm_needs_flatness(requested) && resolve_flat(flat, kernel_c);
 
     const torch::stable::accelerator::DeviceGuard device_guard(input_c.get_device_index());
-    const CurrentContextGuard context_guard(input_c.get_device_index());
-    const auto stream =
-        static_cast<CUstream>(torch::stable::accelerator::getCurrentStream(input_c.get_device_index()).nativeHandle());
+    const ContextGuard context_guard(input_c.get_device_index());
+    const Stream stream = current_stream(input_c.get_device_index());
     const auto border_mode = static_cast<BorderMode>(border);
 
     THO_DISPATCH_V2(input_c.scalar_type(), "serron_morphology_backward", AT_WRAP([&] {

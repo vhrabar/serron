@@ -7,7 +7,6 @@
 
 #include <compat/check.h>
 
-#include <array>
 #include <mutex>
 #include <string>
 
@@ -94,8 +93,6 @@ Driver load_driver() {
     return loaded;
 }
 
-constexpr int kMaxDevices = 64;
-
 } // namespace
 
 const Driver& driver() {
@@ -125,40 +122,6 @@ CUdevice device_handle(const int device_index) {
     CUdevice device = 0;
     check_cu(driver().cuDeviceGet(&device, device_index), "cuDeviceGet");
     return device;
-}
-
-CurrentContextGuard::CurrentContextGuard(const int device_index) {
-    SERRON_CHECK(device_index >= 0 && device_index < kMaxDevices, "serron: device index ", device_index,
-                 " out of range");
-    const Driver& cu = driver();
-    device_ = device_handle(device_index);
-
-    check_cu(cu.cuCtxGetCurrent(&previous_), "cuCtxGetCurrent");
-    if (previous_ != nullptr) {
-        CUdevice current = 0;
-        if (cu.cuCtxGetDevice(&current) == CUDA_SUCCESS && current == device_) {
-            return;
-        }
-    }
-
-    static std::mutex mutex;
-    static std::array<CUcontext, kMaxDevices> primary{};
-    CUcontext context = nullptr;
-    {
-        const std::lock_guard<std::mutex> lock(mutex);
-        if (primary[device_index] == nullptr) {
-            check_cu(cu.cuDevicePrimaryCtxRetain(&primary[device_index], device_), "cuDevicePrimaryCtxRetain");
-        }
-        context = primary[device_index];
-    }
-    check_cu(cu.cuCtxSetCurrent(context), "cuCtxSetCurrent");
-    restore_ = true;
-}
-
-CurrentContextGuard::~CurrentContextGuard() {
-    if (restore_) {
-        driver().cuCtxSetCurrent(previous_);
-    }
 }
 
 } // namespace serron

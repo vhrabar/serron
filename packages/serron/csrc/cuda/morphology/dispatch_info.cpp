@@ -4,7 +4,7 @@
 #include <cuda/morphology/separable.h>
 #include <cuda/morphology/thresholds.h>
 #include <cuda/utils/declarations.h>
-#include <cuda/utils/smem.h>
+#include <gpu/utils/smem.h>
 
 #include <compat/check.h>
 #include <morph_algorithm.h>
