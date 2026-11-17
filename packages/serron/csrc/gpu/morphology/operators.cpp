@@ -39,11 +39,11 @@ const ForwardKernels<scalar_t>& forward_kernels(MorphOp op);
         static const std::array<ForwardKernels<scalar_t>, 2> table = [] {                                              \
             const Library library = kernel_library(KernelFile::kForward);                                              \
             return std::array<ForwardKernels<scalar_t>, 2>{                                                            \
-                SERRON_CUDA_FOR_EACH_OP(SERRON_FORWARD_TABLE_ROW, scalar_t, suffix)};                                  \
+                SERRON_FOR_EACH_OP(SERRON_FORWARD_TABLE_ROW, scalar_t, suffix)};                                       \
         }();                                                                                                           \
         return table[static_cast<int>(op)];                                                                            \
     }
-SERRON_CUDA_FOR_EACH_DTYPE(SERRON_FORWARD_TABLE)
+SERRON_FOR_EACH_DTYPE(SERRON_FORWARD_TABLE)
 
 /**
  * Chains the row pass (@p input -> @p scratch) into the column pass (@p scratch ->

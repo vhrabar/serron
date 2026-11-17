@@ -1,5 +1,5 @@
-#ifndef SERRON_CUDA_MORPHOLOGY_THRESHOLDS_H
-#define SERRON_CUDA_MORPHOLOGY_THRESHOLDS_H
+#ifndef SERRON_GPU_MORPHOLOGY_THRESHOLDS_H
+#define SERRON_GPU_MORPHOLOGY_THRESHOLDS_H
 
 #include <gpu/morphology/separable.h>
 
@@ -72,4 +72,4 @@ inline void set_separable_min_k(const int device, const torch::headeronly::Scala
 
 } // namespace serron
 
-#endif // SERRON_CUDA_MORPHOLOGY_THRESHOLDS_H
+#endif // SERRON_GPU_MORPHOLOGY_THRESHOLDS_H

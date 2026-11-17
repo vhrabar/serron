@@ -42,11 +42,11 @@ const BackwardKernels<scalar_t>& backward_kernels(MorphOp op);
         static const std::array<BackwardKernels<scalar_t>, 2> table = [] {                                             \
             const Library library = kernel_library(KernelFile::kBackward);                                             \
             return std::array<BackwardKernels<scalar_t>, 2>{                                                           \
-                SERRON_CUDA_FOR_EACH_OP(SERRON_BACKWARD_TABLE_ROW, scalar_t, suffix)};                                 \
+                SERRON_FOR_EACH_OP(SERRON_BACKWARD_TABLE_ROW, scalar_t, suffix)};                                      \
         }();                                                                                                           \
         return table[static_cast<int>(op)];                                                                            \
     }
-SERRON_CUDA_FOR_EACH_DTYPE(SERRON_BACKWARD_TABLE)
+SERRON_FOR_EACH_DTYPE(SERRON_BACKWARD_TABLE)
 
 /**
  * Launches the separable backward: the row pass into @p row_best_val / @p row_best_dj,

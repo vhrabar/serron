@@ -1,5 +1,5 @@
-#ifndef SERRON_CUDA_MORPHOLOGY_ALGORITHM_H
-#define SERRON_CUDA_MORPHOLOGY_ALGORITHM_H
+#ifndef SERRON_GPU_MORPHOLOGY_ALGORITHM_H
+#define SERRON_GPU_MORPHOLOGY_ALGORITHM_H
 
 #include <gpu/morphology/arg_tap.h>
 #include <gpu/morphology/separable.h>
@@ -143,4 +143,4 @@ inline bool algorithm_needs_flatness(const Algorithm requested) {
 
 } // namespace serron
 
-#endif // SERRON_CUDA_MORPHOLOGY_ALGORITHM_H
+#endif // SERRON_GPU_MORPHOLOGY_ALGORITHM_H

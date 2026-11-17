@@ -1,5 +1,5 @@
-#ifndef SERRON_CUDA_BORDER_MODE_H
-#define SERRON_CUDA_BORDER_MODE_H
+#ifndef SERRON_GPU_BORDER_MODE_H
+#define SERRON_GPU_BORDER_MODE_H
 
 /**
  * Boundary handling for out-of-image neighbourhood samples.
@@ -10,4 +10,4 @@ enum BorderMode : int {
     kConstant = 2,  ///< out-of-bounds resolved to the neutral element by the caller
 };
 
-#endif // SERRON_CUDA_BORDER_MODE_H
+#endif // SERRON_GPU_BORDER_MODE_H

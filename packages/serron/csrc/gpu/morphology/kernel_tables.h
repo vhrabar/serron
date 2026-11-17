@@ -1,5 +1,5 @@
-#ifndef SERRON_CUDA_MORPHOLOGY_KERNEL_TABLES_H
-#define SERRON_CUDA_MORPHOLOGY_KERNEL_TABLES_H
+#ifndef SERRON_GPU_MORPHOLOGY_KERNEL_TABLES_H
+#define SERRON_GPU_MORPHOLOGY_KERNEL_TABLES_H
 
 #include <gpu/morphology/entry_points.h>
 #include <gpu/utils/launch.h>
@@ -38,4 +38,4 @@ struct BackwardKernels {
 
 } // namespace serron
 
-#endif // SERRON_CUDA_MORPHOLOGY_KERNEL_TABLES_H
+#endif // SERRON_GPU_MORPHOLOGY_KERNEL_TABLES_H

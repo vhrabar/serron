@@ -296,13 +296,13 @@ __device__ __forceinline__ void morphology_line_kernel(const scalar_t* __restric
     }
 
 #define SERRON_FORWARD_ENTRY_POINTS_FOR_DTYPE(scalar_t, suffix)                                                        \
-    SERRON_CUDA_FOR_EACH_OP(SERRON_FORWARD_ENTRY_POINTS, scalar_t, suffix)
-SERRON_CUDA_FOR_EACH_DTYPE(SERRON_FORWARD_ENTRY_POINTS_FOR_DTYPE)
+    SERRON_FOR_EACH_OP(SERRON_FORWARD_ENTRY_POINTS, scalar_t, suffix)
+SERRON_FOR_EACH_DTYPE(SERRON_FORWARD_ENTRY_POINTS_FOR_DTYPE)
 
 #define SERRON_CHECK_FORWARD_ENTRY_POINTS(Op, op, scalar_t, suffix)                                                    \
     SERRON_FORWARD_KERNELS(SERRON_CHECK_ENTRY_POINT_TYPE, op, scalar_t, suffix)
 #define SERRON_CHECK_FORWARD_ENTRY_POINTS_FOR_DTYPE(scalar_t, suffix)                                                  \
-    SERRON_CUDA_FOR_EACH_OP(SERRON_CHECK_FORWARD_ENTRY_POINTS, scalar_t, suffix)
-SERRON_CUDA_FOR_EACH_DTYPE(SERRON_CHECK_FORWARD_ENTRY_POINTS_FOR_DTYPE)
+    SERRON_FOR_EACH_OP(SERRON_CHECK_FORWARD_ENTRY_POINTS, scalar_t, suffix)
+SERRON_FOR_EACH_DTYPE(SERRON_CHECK_FORWARD_ENTRY_POINTS_FOR_DTYPE)
 
 } // namespace serron

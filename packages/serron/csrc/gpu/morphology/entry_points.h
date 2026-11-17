@@ -1,5 +1,5 @@
-#ifndef SERRON_CUDA_MORPHOLOGY_ENTRY_POINTS_H
-#define SERRON_CUDA_MORPHOLOGY_ENTRY_POINTS_H
+#ifndef SERRON_GPU_MORPHOLOGY_ENTRY_POINTS_H
+#define SERRON_GPU_MORPHOLOGY_ENTRY_POINTS_H
 
 #include <gpu/morphology/enums.h>
 #include <gpu/utils/border_mode.h>
@@ -22,11 +22,11 @@
  */
 
 /**
- * Calls @c X(scalar_t, suffix) once per dtype the CUDA kernels are built for. @c suffix ends the entry point's name.
+ * Calls @c X(scalar_t, suffix) once per dtype the GPU kernels are built for. @c suffix ends the entry point's name.
  *
  * Must list the same dtypes as the @c THO_DISPATCH_V2 calls in operators.cpp and backward.cpp.
  */
-#define SERRON_CUDA_FOR_EACH_DTYPE(X)                                                                                  \
+#define SERRON_FOR_EACH_DTYPE(X)                                                                                       \
     X(float, f32)                                                                                                      \
     X(double, f64)                                                                                                     \
     X(torch::headeronly::Half, f16)                                                                                    \
@@ -34,16 +34,16 @@
 
 /**
  * Calls @c X(Op, op, scalar_t, suffix) once per morphology operation, for use inside a
- * @ref SERRON_CUDA_FOR_EACH_DTYPE callback. @c Op is the policy type, @c op the name part of the entry point.
+ * @ref SERRON_FOR_EACH_DTYPE callback. @c Op is the policy type, @c op the name part of the entry point.
  *
  * The order is the @ref MorphOp order, which the kernel tables index by.
  */
-#define SERRON_CUDA_FOR_EACH_OP(X, scalar_t, suffix)                                                                   \
+#define SERRON_FOR_EACH_OP(X, scalar_t, suffix)                                                                        \
     X(ErodeOp, erode, scalar_t, suffix)                                                                                \
     X(DilateOp, dilate, scalar_t, suffix)
 
 static_assert(static_cast<int>(MorphOp::kErode) == 0 && static_cast<int>(MorphOp::kDilate) == 1,
-              "kernel tables are indexed by MorphOp in SERRON_CUDA_FOR_EACH_OP order");
+              "kernel tables are indexed by MorphOp in SERRON_FOR_EACH_OP order");
 
 /**
  * Calls @c X(member, name, Fn, scalar_t) once per forward kernel of one (op, dtype): the @ref ForwardKernels
@@ -132,4 +132,4 @@ using BackwardColArgreduceFn = void(const scalar_t*, const std::int32_t*, const 
 
 } // namespace serron
 
-#endif // SERRON_CUDA_MORPHOLOGY_ENTRY_POINTS_H
+#endif // SERRON_GPU_MORPHOLOGY_ENTRY_POINTS_H

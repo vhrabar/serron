@@ -1,5 +1,5 @@
-#ifndef SERRON_CUDA_DECLARATIONS_H
-#define SERRON_CUDA_DECLARATIONS_H
+#ifndef SERRON_GPU_DECLARATIONS_H
+#define SERRON_GPU_DECLARATIONS_H
 
 /// Threads per block for the element-wise morphology launches.
 constexpr int THREADS = 256;
@@ -22,4 +22,4 @@ constexpr int LINE_WARPS = LINE_TILE / WARP_SIZE;
 
 static_assert(LINE_TILE % WARP_SIZE == 0, "a line block must be a whole number of logical warps");
 
-#endif // SERRON_CUDA_DECLARATIONS_H
+#endif // SERRON_GPU_DECLARATIONS_H

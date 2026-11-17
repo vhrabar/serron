@@ -1,5 +1,5 @@
-#ifndef SERRON_CUDA_MORPHOLOGY_SEPARABLE_H
-#define SERRON_CUDA_MORPHOLOGY_SEPARABLE_H
+#ifndef SERRON_GPU_MORPHOLOGY_SEPARABLE_H
+#define SERRON_GPU_MORPHOLOGY_SEPARABLE_H
 
 #include <gpu/utils/backend.h>
 #include <gpu/utils/declarations.h>
@@ -105,4 +105,4 @@ inline bool resolve_flat(const std::optional<bool>& flat, const Tensor& kernel_c
 
 } // namespace serron
 
-#endif // SERRON_CUDA_MORPHOLOGY_SEPARABLE_H
+#endif // SERRON_GPU_MORPHOLOGY_SEPARABLE_H
