@@ -1,6 +1,5 @@
 #include "ops.h"
 
-// Generated from forward_kernels.cu by cmake/embed_fatbin.cmake.
 #include <cuda/morphology/algorithm.h>
 #include <cuda/morphology/entry_points.h>
 #include <cuda/morphology/enums.h>
@@ -14,7 +13,6 @@
 #include <gpu/utils/smem.h>
 
 #include <compat/check.h>
-#include <forward_fatbin.h>
 #include <morph_algorithm.h>
 #include <torch/csrc/stable/accelerator.h>
 #include <torch/csrc/stable/ops.h>
@@ -29,12 +27,6 @@ namespace serron {
 
 namespace {
 
-/// The forward kernels' fatbin, embedded at build time and loaded on first use.
-Library forward_library() {
-    static const Library library = load_kernel_library(serron_forward_fatbin, "forward");
-    return library;
-}
-
 /// Forward entry points for @p op on @c scalar_t, looked up by name on first use; specialised per dtype below.
 template <typename scalar_t>
 const ForwardKernels<scalar_t>& forward_kernels(MorphOp op);
@@ -45,7 +37,7 @@ const ForwardKernels<scalar_t>& forward_kernels(MorphOp op);
     template <>                                                                                                        \
     const ForwardKernels<scalar_t>& forward_kernels<scalar_t>(const MorphOp op) {                                      \
         static const std::array<ForwardKernels<scalar_t>, 2> table = [] {                                              \
-            const Library library = forward_library();                                                                 \
+            const Library library = kernel_library(KernelFile::kForward);                                              \
             return std::array<ForwardKernels<scalar_t>, 2>{                                                            \
                 SERRON_CUDA_FOR_EACH_OP(SERRON_FORWARD_TABLE_ROW, scalar_t, suffix)};                                  \
         }();                                                                                                           \

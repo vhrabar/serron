@@ -13,7 +13,6 @@
 #include <gpu/utils/launch.h>
 #include <gpu/utils/smem.h>
 
-#include <backward_fatbin.h>
 #include <compat/acc_type.h>
 #include <compat/check.h>
 #include <morph_algorithm.h>
@@ -31,12 +30,6 @@ namespace serron {
 
 namespace {
 
-/// The backward kernels' fatbin, embedded at build time and loaded on first use.
-Library backward_library() {
-    static const Library library = load_kernel_library(serron_backward_fatbin, "backward");
-    return library;
-}
-
 /// Backward entry points for @p op on @c scalar_t, looked up by name on first use; specialised per dtype below.
 template <typename scalar_t>
 const BackwardKernels<scalar_t>& backward_kernels(MorphOp op);
@@ -47,7 +40,7 @@ const BackwardKernels<scalar_t>& backward_kernels(MorphOp op);
     template <>                                                                                                        \
     const BackwardKernels<scalar_t>& backward_kernels<scalar_t>(const MorphOp op) {                                    \
         static const std::array<BackwardKernels<scalar_t>, 2> table = [] {                                             \
-            const Library library = backward_library();                                                                \
+            const Library library = kernel_library(KernelFile::kBackward);                                             \
             return std::array<BackwardKernels<scalar_t>, 2>{                                                           \
                 SERRON_CUDA_FOR_EACH_OP(SERRON_BACKWARD_TABLE_ROW, scalar_t, suffix)};                                 \
         }();                                                                                                           \

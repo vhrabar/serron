@@ -52,14 +52,17 @@ class ContextGuard {
     bool restore_ = false;
 };
 
+/// The kernel files the GPU code is built from. Each is embedded in the library as its own image.
+enum class KernelFile { kForward, kBackward };
+
 /**
- * Loads a kernel image embedded in the library.
+ * The loaded kernels of @p file, loaded on first use and kept for the life of the process.
  *
- * @param image  Start of the image, aligned to 8 bytes.
- * @param what   Name used in the error message.
+ * The backend decides what image that is and how it is loaded; the caller only looks kernels up in it by name.
+ *
  * @throws std::runtime_error  if the runtime rejects the image, for example when it holds no code this GPU can run.
  */
-Library load_kernel_library(const void* image, const char* what);
+Library kernel_library(KernelFile file);
 
 /**
  * Looks up the kernel called @p name in @p library.

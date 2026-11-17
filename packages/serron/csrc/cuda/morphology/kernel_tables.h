@@ -5,7 +5,7 @@
 #include <gpu/utils/launch.h>
 
 /**
- * Host-side tables of the kernel handles for one (op, dtype), filled from the embedded fatbins by name.
+ * Host-side tables of the kernel handles for one (op, dtype), filled from the embedded kernel images by name.
  */
 
 namespace serron {

@@ -5,7 +5,9 @@
 
 #include <cuda.h>
 
+#include <backward_fatbin.h>
 #include <compat/check.h>
+#include <forward_fatbin.h>
 #include <torch/csrc/stable/accelerator.h>
 
 #include <array>
@@ -16,6 +18,26 @@ namespace serron {
 namespace {
 
 constexpr int kMaxDevices = 64;
+
+/**
+ * Loads a fatbin embedded in the library. The result is context-independent: each device loads its own copy of the
+ * code the first time a kernel from it is launched there.
+ *
+ * @param image  Start of the fatbin, aligned to 8 bytes.
+ * @param what   Name used in the error message.
+ */
+Library load_fatbin(const void* image, const char* what) {
+    const Driver& cu = driver();
+    CUlibrary library = nullptr;
+    const CUresult result = cu.cuLibraryLoadData(&library, image, nullptr, nullptr, 0, nullptr, nullptr, 0);
+    if (result == CUDA_ERROR_NO_BINARY_FOR_GPU || result == CUDA_ERROR_UNSUPPORTED_PTX_VERSION) {
+        SERRON_CHECK(false, "serron: the ", what, " kernels were built with CUDA ", CUDA_VERSION / 1000, ".",
+                     (CUDA_VERSION % 1000) / 10, " and the driver (CUDA ", cu.version / 1000, ".",
+                     (cu.version % 1000) / 10, ") cannot run them on this GPU. Update the NVIDIA driver.");
+    }
+    check_cu(result, "loading the kernels (cuLibraryLoadData)");
+    return library;
+}
 
 } // namespace
 
@@ -55,17 +77,19 @@ ContextGuard::~ContextGuard() {
     }
 }
 
-Library load_kernel_library(const void* image, const char* what) {
-    const Driver& cu = driver();
-    CUlibrary library = nullptr;
-    const CUresult result = cu.cuLibraryLoadData(&library, image, nullptr, nullptr, 0, nullptr, nullptr, 0);
-    if (result == CUDA_ERROR_NO_BINARY_FOR_GPU || result == CUDA_ERROR_UNSUPPORTED_PTX_VERSION) {
-        SERRON_CHECK(false, "serron: the ", what, " kernels were built with CUDA ", CUDA_VERSION / 1000, ".",
-                     (CUDA_VERSION % 1000) / 10, " and the driver (CUDA ", cu.version / 1000, ".",
-                     (cu.version % 1000) / 10, ") cannot run them on this GPU. Update the NVIDIA driver.");
+Library kernel_library(const KernelFile file) {
+    switch (file) {
+    case KernelFile::kForward: {
+        static const Library library = load_fatbin(serron_forward_fatbin, "forward");
+        return library;
     }
-    check_cu(result, "loading the kernels (cuLibraryLoadData)");
-    return library;
+    case KernelFile::kBackward: {
+        static const Library library = load_fatbin(serron_backward_fatbin, "backward");
+        return library;
+    }
+    }
+    SERRON_CHECK(false, "serron: unknown kernel file ", static_cast<int>(file));
+    return nullptr;
 }
 
 KernelHandle find_kernel(const Library library, const char* name) {
