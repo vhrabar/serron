@@ -74,6 +74,23 @@ if(SERRON_CUDA)
     find_package(CUDAToolkit REQUIRED)
 endif()
 
+
+option(SERRON_ROCM "Build the ROCm backend" OFF)
+set(SERRON_ROCM_ROOT "" CACHE PATH "ROCm install path; else ROCM_PATH, HIP_PATH or /opt/rocm")
+if(SERRON_ROCM)
+    if(SERRON_ROCM_ROOT)
+        find_path(SERRON_HIP_INCLUDE_DIR hip/hip_runtime_api.h HINTS "${SERRON_ROCM_ROOT}" PATH_SUFFIXES include
+                NO_DEFAULT_PATH)
+    else()
+        find_path(SERRON_HIP_INCLUDE_DIR hip/hip_runtime_api.h HINTS ENV ROCM_PATH ENV HIP_PATH PATHS /opt/rocm
+                PATH_SUFFIXES include)
+    endif()
+    if(NOT SERRON_HIP_INCLUDE_DIR)
+        message(FATAL_ERROR "serron: SERRON_ROCM is ON but hip/hip_runtime_api.h was not found!")
+    endif()
+    message(STATUS "serron: building the ROCm backend (HIP headers in ${SERRON_HIP_INCLUDE_DIR})")
+endif()
+
 execute_process(
         COMMAND ${Python_EXECUTABLE} -c "import torch; print(torch.__version__.split('+')[0])"
         OUTPUT_VARIABLE SERRON_TORCH_VERSION
@@ -169,6 +186,20 @@ if(SERRON_CUDA)
     list(APPEND _serron_compiled_targets _C_cuda)
 endif()
 
+if(SERRON_ROCM)
+    add_library(_C_rocm SHARED
+            csrc/gpu/bindings.cpp
+            csrc/gpu/morphology/operators.cpp
+            csrc/gpu/morphology/backward.cpp
+            csrc/gpu/morphology/dispatch_info.cpp
+            csrc/rocm/utils/backend.cpp
+            csrc/rocm/utils/runtime.cpp
+    )
+    target_include_directories(_C_rocm PRIVATE "${SERRON_HIP_INCLUDE_DIR}")
+    list(APPEND _serron_targets _C_rocm)
+    list(APPEND _serron_compiled_targets _C_rocm)
+endif()
+
 # Headers are listed only so IDEs index them; they are not compiled on their own.
 set(_serron_headers
         csrc/ops.h
@@ -212,6 +243,17 @@ if(SERRON_CUDA)
     )
     set_source_files_properties(${_serron_cuda_headers} PROPERTIES HEADER_FILE_ONLY TRUE)
     target_sources(_C_cuda PRIVATE ${_serron_cuda_headers})
+endif()
+
+if(SERRON_ROCM)
+    set(_serron_rocm_headers
+            csrc/gpu/utils/backend.h
+            csrc/gpu/utils/launch.h
+            csrc/gpu/utils/smem.h
+            csrc/rocm/utils/runtime.hip.h
+    )
+    set_source_files_properties(${_serron_rocm_headers} PROPERTIES HEADER_FILE_ONLY TRUE)
+    target_sources(_C_rocm PRIVATE ${_serron_rocm_headers})
 endif()
 
 set(SERRON_CUDA_NVCC_THREADS 1 CACHE STRING "nvcc --threads (per-.cu arch parallelism)")
@@ -268,6 +310,10 @@ target_link_libraries(_C PRIVATE "${SERRON_TORCH_CPU_LIBRARY}")
 if(SERRON_CUDA)
     target_include_directories(_C_cuda PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
     target_link_libraries(_C_cuda PRIVATE "${SERRON_TORCH_CPU_LIBRARY}" ${CMAKE_DL_LIBS})
+endif()
+
+if(SERRON_ROCM)
+    target_link_libraries(_C_rocm PRIVATE "${SERRON_TORCH_CPU_LIBRARY}" ${CMAKE_DL_LIBS})
 endif()
 
 # On Windows the .dll is a RUNTIME artifact, which would otherwise land in bin/ outside the package.
