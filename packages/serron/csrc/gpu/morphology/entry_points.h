@@ -1,8 +1,8 @@
 #ifndef SERRON_CUDA_MORPHOLOGY_ENTRY_POINTS_H
 #define SERRON_CUDA_MORPHOLOGY_ENTRY_POINTS_H
 
-#include <cuda/morphology/enums.h>
-#include <cuda/utils/border_mode.h>
+#include <gpu/morphology/enums.h>
+#include <gpu/utils/border_mode.h>
 
 #include <compat/acc_type.h>
 #include <torch/headeronly/util/BFloat16.h>

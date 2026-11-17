@@ -1,8 +1,8 @@
 #ifndef SERRON_ROCM_SHUFFLE_HIP_H
 #define SERRON_ROCM_SHUFFLE_HIP_H
 
-#include <cuda/utils/declarations.h>
 #include <cuda/utils/device_runtime.h>
+#include <gpu/utils/declarations.h>
 
 namespace serron {
 

@@ -80,7 +80,7 @@ def main() -> int:
     status = 0
     for name in KERNELS:
         for arch in args.arch:
-            source = args.csrc / "cuda" / "morphology" / name
+            source = args.csrc / "gpu" / "morphology" / name
             log = compile_one(rtc, source, arch, includes)
             if "hip/hip_runtime.h' file not found" in log and rocm_include.is_dir():
                 log = compile_one(rtc, source, arch, [*includes, str(rocm_include)])

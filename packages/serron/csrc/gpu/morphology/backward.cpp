@@ -1,15 +1,15 @@
 #include "ops.h"
 
-#include <cuda/morphology/algorithm.h>
-#include <cuda/morphology/arg_tap.h>
-#include <cuda/morphology/entry_points.h>
-#include <cuda/morphology/enums.h>
-#include <cuda/morphology/kernel_tables.h>
-#include <cuda/morphology/separable.h>
-#include <cuda/morphology/thresholds.h>
-#include <cuda/utils/border_mode.h>
-#include <cuda/utils/declarations.h>
+#include <gpu/morphology/algorithm.h>
+#include <gpu/morphology/arg_tap.h>
+#include <gpu/morphology/entry_points.h>
+#include <gpu/morphology/enums.h>
+#include <gpu/morphology/kernel_tables.h>
+#include <gpu/morphology/separable.h>
+#include <gpu/morphology/thresholds.h>
 #include <gpu/utils/backend.h>
+#include <gpu/utils/border_mode.h>
+#include <gpu/utils/declarations.h>
 #include <gpu/utils/launch.h>
 #include <gpu/utils/smem.h>
 

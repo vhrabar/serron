@@ -1,7 +1,7 @@
 #ifndef SERRON_CUDA_MORPHOLOGY_KERNEL_TABLES_H
 #define SERRON_CUDA_MORPHOLOGY_KERNEL_TABLES_H
 
-#include <cuda/morphology/entry_points.h>
+#include <gpu/morphology/entry_points.h>
 #include <gpu/utils/launch.h>
 
 /**

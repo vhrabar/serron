@@ -1,8 +1,8 @@
 #ifndef SERRON_CUDA_MORPHOLOGY_SEPARABLE_H
 #define SERRON_CUDA_MORPHOLOGY_SEPARABLE_H
 
-#include <cuda/utils/declarations.h>
 #include <gpu/utils/backend.h>
+#include <gpu/utils/declarations.h>
 #include <gpu/utils/launch.h>
 
 #include <compat/check.h>

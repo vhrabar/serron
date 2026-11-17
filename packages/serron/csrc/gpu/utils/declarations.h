@@ -13,7 +13,7 @@ constexpr int LINE_TILE = 256;
 
 /**
  * Lanes per logical warp. This is the unit the separable scans work in, not the hardware width: an AMD wave can be 64
- * lanes, which the kernels treat as two logical warps (see cuda/utils/shuffle.cuh).
+ * lanes, which the kernels treat as two logical warps (see gpu/utils/shuffle.cuh).
  */
 constexpr int WARP_SIZE = 32;
 

@@ -1,8 +1,8 @@
 #ifndef SERRON_CUDA_SHUFFLE_CUH
 #define SERRON_CUDA_SHUFFLE_CUH
 
-#include <cuda/utils/declarations.h>
 #include <cuda/utils/device_runtime.h>
+#include <gpu/utils/declarations.h>
 
 namespace serron {
 

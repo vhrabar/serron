@@ -131,7 +131,7 @@ if(SERRON_CUDA)
     set(_serron_fatbin_headers)
     foreach(_kernels IN ITEMS forward backward)
         set(_fatbin_target _serron_${_kernels}_fatbin)
-        add_library(${_fatbin_target} OBJECT csrc/cuda/morphology/${_kernels}_kernels.cu)
+        add_library(${_fatbin_target} OBJECT csrc/gpu/morphology/${_kernels}_kernels.cu)
         set_target_properties(${_fatbin_target} PROPERTIES CUDA_FATBIN_COMPILATION ON)
         if(WIN32)
             target_compile_definitions(${_fatbin_target} PRIVATE C10_USING_CUSTOM_GENERATED_MACROS)
@@ -156,10 +156,10 @@ if(SERRON_CUDA)
     endforeach()
 
     add_library(_C_cuda SHARED
-            csrc/cuda/bindings.cpp
-            csrc/cuda/morphology/operators.cpp
-            csrc/cuda/morphology/backward.cpp
-            csrc/cuda/morphology/dispatch_info.cpp
+            csrc/gpu/bindings.cpp
+            csrc/gpu/morphology/operators.cpp
+            csrc/gpu/morphology/backward.cpp
+            csrc/gpu/morphology/dispatch_info.cpp
             csrc/cuda/utils/backend.cpp
             csrc/cuda/utils/driver.cpp
             ${_serron_fatbin_headers}
@@ -188,9 +188,9 @@ target_sources(_C PRIVATE ${_serron_headers})
 if(SERRON_CUDA)
     set(_serron_cuda_headers
             csrc/compat/atomic.cuh
-            csrc/cuda/utils/border_mode.h
-            csrc/cuda/utils/boundaries.cuh
-            csrc/cuda/utils/declarations.h
+            csrc/gpu/utils/border_mode.h
+            csrc/gpu/utils/boundaries.cuh
+            csrc/gpu/utils/declarations.h
             csrc/cuda/utils/device_runtime.h
             csrc/cuda/utils/driver.h
             csrc/cuda/utils/shuffle.cuh
@@ -199,13 +199,13 @@ if(SERRON_CUDA)
             csrc/gpu/utils/shuffle.cuh
             csrc/gpu/utils/smem.h
             csrc/rocm/utils/shuffle.hip.h
-            csrc/cuda/morphology/arg_tap.h
-            csrc/cuda/morphology/entry_points.h
-            csrc/cuda/morphology/enums.h
-            csrc/cuda/morphology/kernel_tables.h
-            csrc/cuda/morphology/ops_policy.cuh
-            csrc/cuda/morphology/scan.cuh
-            csrc/cuda/morphology/separable.h
+            csrc/gpu/morphology/arg_tap.h
+            csrc/gpu/morphology/entry_points.h
+            csrc/gpu/morphology/enums.h
+            csrc/gpu/morphology/kernel_tables.h
+            csrc/gpu/morphology/ops_policy.cuh
+            csrc/gpu/morphology/scan.cuh
+            csrc/gpu/morphology/separable.h
     )
     set_source_files_properties(${_serron_cuda_headers} PROPERTIES HEADER_FILE_ONLY TRUE)
     target_sources(_C_cuda PRIVATE ${_serron_cuda_headers})
