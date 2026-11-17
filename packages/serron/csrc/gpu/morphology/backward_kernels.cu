@@ -1,9 +1,9 @@
-#include <cuda/utils/device_runtime.h>
 #include <gpu/morphology/entry_points.h>
 #include <gpu/morphology/ops_policy.cuh>
 #include <gpu/morphology/scan.cuh>
 #include <gpu/utils/boundaries.cuh>
 #include <gpu/utils/declarations.h>
+#include <gpu/utils/device_runtime.h>
 
 #include <compat/acc_type.h>
 #include <compat/atomic.cuh>

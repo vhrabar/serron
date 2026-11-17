@@ -5,7 +5,7 @@
 #ifndef SERRON_COMPAT_ATOMIC_CUH
 #define SERRON_COMPAT_ATOMIC_CUH
 
-#include <cuda/utils/device_runtime.h>
+#include <gpu/utils/device_runtime.h>
 
 namespace serron {
 

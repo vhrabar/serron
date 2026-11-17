@@ -1,8 +1,8 @@
 #ifndef SERRON_BOUNDARIES_CUH
 #define SERRON_BOUNDARIES_CUH
 
-#include <cuda/utils/device_runtime.h>
 #include <gpu/utils/border_mode.h>
+#include <gpu/utils/device_runtime.h>
 
 #include <cstdint>
 

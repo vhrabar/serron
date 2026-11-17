@@ -1,9 +1,9 @@
 #ifndef SERRON_MORPHOLOGY_SCAN_CUH
 #define SERRON_MORPHOLOGY_SCAN_CUH
 
-#include <cuda/utils/device_runtime.h>
 #include <gpu/morphology/arg_tap.h>
 #include <gpu/utils/declarations.h>
+#include <gpu/utils/device_runtime.h>
 #include <gpu/utils/shuffle.cuh>
 
 #include <compat/acc_type.h>

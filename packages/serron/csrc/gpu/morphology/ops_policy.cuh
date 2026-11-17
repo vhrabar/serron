@@ -1,7 +1,7 @@
 #ifndef SERRON_MORPHOLOGY_OPS_POLICY_CUH
 #define SERRON_MORPHOLOGY_OPS_POLICY_CUH
 
-#include <cuda/utils/device_runtime.h>
+#include <gpu/utils/device_runtime.h>
 
 #include <cmath>
 
