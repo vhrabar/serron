@@ -200,6 +200,7 @@ if(SERRON_CUDA)
             csrc/gpu/utils/shuffle.cuh
             csrc/gpu/utils/smem.h
             csrc/rocm/utils/device_runtime.hip.h
+            csrc/rocm/utils/runtime.hip.h
             csrc/rocm/utils/shuffle.hip.h
             csrc/gpu/morphology/arg_tap.h
             csrc/gpu/morphology/entry_points.h
