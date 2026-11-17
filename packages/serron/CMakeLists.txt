@@ -101,6 +101,11 @@ if(SERRON_CUDA)
 else()
     set(SERRON_WITH_CUDA_PY False)
 endif()
+if(SERRON_ROCM)
+    set(SERRON_WITH_ROCM_PY True)
+else()
+    set(SERRON_WITH_ROCM_PY False)
+endif()
 # Restrict the extension to the torch stable ABI
 option(SERRON_STABLE_ABI "Build against the torch stable ABI only" ON)
 
