@@ -103,7 +103,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         {
             "serron": __version__,
             "torch": torch.__version__,
-            "cuda": fingerprint["cuda"],
+            **{key: fingerprint[key] for key in ("cuda", "rocm") if key in fingerprint},
             "date": datetime.date.today().isoformat(),
             "shape": list(_SHAPE),
             "ks": ks,

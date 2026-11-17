@@ -1,7 +1,7 @@
 """
 Separable thresholds shipped with the library, for GPUs someone has already calibrated.
 
-``_seeds.json`` maps a compute capability to the thresholds :func:`serron.calibrate` found on a GPU with it. They
+``_seeds.json`` maps a compute capability/arch to the thresholds :func:`serron.calibrate` found on a GPU with it. They
 are the starting point on that architecture, so a fresh install picks a sensible algorithm before anyone calibrates.
 A calibration saved on the machine beats a seed, and ``SERRON_SEPARABLE_MIN_K`` beats both.
 
@@ -30,7 +30,9 @@ __all__ = [
 SEED_FORMAT_VERSION = 1
 _FILE = "_seeds.json"
 
-_CAPABILITY = re.compile(r"^\d+\.\d+$")
+# A compute capability on CUDA
+# A GPU architecture on ROCm
+_CAPABILITY = re.compile(r"^(\d+\.\d+|gfx[0-9a-f]+)$")
 _KEY = re.compile(r"^[a-z0-9]+:(fwd|bwd)$")
 
 
@@ -54,7 +56,7 @@ def parse_seeds(raw: object) -> dict[str, dict[str, int]]:
     seeds: dict[str, dict[str, int]] = {}
     for capability, entry in devices.items():
         if not _CAPABILITY.match(capability):
-            raise ValueError(f"{capability!r} is not a compute capability such as '12.0'")
+            raise ValueError(f"{capability!r} is not a compute capability such as '12.0' or a ROCm architecture such as 'gfx942'")
         if not isinstance(entry, dict) or not isinstance(entry.get("thresholds"), dict) or not entry["thresholds"]:
             raise ValueError(f"devices.{capability}.thresholds must be a non-empty object")
         for key, value in entry["thresholds"].items():
@@ -85,9 +87,9 @@ def load_seeds() -> dict[str, dict[str, int]]:
 
 def seed_thresholds(capability: str) -> dict[str, int] | None:
     """
-    Seed thresholds for a compute capability.
+    Seed thresholds for a compute capability or ROCm architecture.
 
-    :param capability: for example ``"12.0"``.
+    :param capability: for example ``"12.0"`` or ``"gfx942"``.
     :returns: a copy of the thresholds, or ``None`` if nothing has been calibrated on that architecture.
     """
     found = load_seeds().get(capability)
