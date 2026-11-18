@@ -89,6 +89,32 @@ if(SERRON_ROCM)
         message(FATAL_ERROR "serron: SERRON_ROCM is ON but hip/hip_runtime_api.h was not found!")
     endif()
     message(STATUS "serron: building the ROCm backend (HIP headers in ${SERRON_HIP_INCLUDE_DIR})")
+
+    # ROCm kernels are built for common archs + portable AMD GCN SPIR-V
+    set(SERRON_ROCM_ARCHS "gfx90a;gfx942;gfx950;gfx1100;gfx1201" CACHE STRING
+            "GPU architectures to build native ROCm kernel images for; the portable image covers the rest")
+    if(SERRON_ROCM_ROOT)
+        find_program(SERRON_HIPCC hipcc HINTS "${SERRON_ROCM_ROOT}/bin" NO_DEFAULT_PATH)
+    else()
+        find_program(SERRON_HIPCC hipcc HINTS ENV ROCM_PATH ENV HIP_PATH PATHS /opt/rocm PATH_SUFFIXES bin)
+    endif()
+    if(NOT SERRON_HIPCC)
+        message(FATAL_ERROR "serron: SERRON_ROCM is ON but hipcc was not found.")
+    endif()
+    get_filename_component(SERRON_HIPCC_ROOT "${SERRON_HIPCC}" REALPATH)
+    get_filename_component(SERRON_HIPCC_ROOT "${SERRON_HIPCC_ROOT}" DIRECTORY)
+    get_filename_component(SERRON_HIPCC_ROOT "${SERRON_HIPCC_ROOT}" DIRECTORY)
+    execute_process(COMMAND "${SERRON_HIPCC}" "--rocm-path=${SERRON_HIPCC_ROOT}" --version
+            OUTPUT_VARIABLE _serron_hipcc_version OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    string(REGEX MATCH "[^\n]*clang version[^\n]*" _serron_hipcc_version "${_serron_hipcc_version}")
+
+    find_path(SERRON_ROCM_DEVICE_LIBS ocml.bc HINTS "${SERRON_HIPCC_ROOT}" NO_DEFAULT_PATH
+            PATH_SUFFIXES amdgcn/bitcode lib/amdgcn/bitcode lib/llvm/amdgcn/bitcode)
+    set(SERRON_HIPCC_FLAGS "--rocm-path=${SERRON_HIPCC_ROOT}")
+    if(SERRON_ROCM_DEVICE_LIBS)
+        list(APPEND SERRON_HIPCC_FLAGS "--rocm-device-lib-path=${SERRON_ROCM_DEVICE_LIBS}")
+    endif()
+    message(STATUS "serron: ROCm kernel images built by ${SERRON_HIPCC} (${_serron_hipcc_version}) for ${SERRON_ROCM_ARCHS} and AMD GCN SPIR-V")
 endif()
 
 execute_process(
@@ -201,6 +227,37 @@ if(SERRON_ROCM)
             csrc/rocm/utils/runtime.cpp
     )
     target_include_directories(_C_rocm PRIVATE "${SERRON_HIP_INCLUDE_DIR}")
+
+    # One code object per architecture and one portable image per kernel file
+    set(_serron_image_dir "${CMAKE_CURRENT_BINARY_DIR}/rocm_images")
+    set(_serron_image_includes "-I${CMAKE_CURRENT_SOURCE_DIR}/csrc" "-I${CMAKE_CURRENT_SOURCE_DIR}/csrc/compat")
+    foreach(_dir IN LISTS TORCH_INCLUDE_DIRS)
+        list(APPEND _serron_image_includes "-I${_dir}")
+    endforeach()
+    set(_serron_rocm_images)
+    foreach(_kernels IN ITEMS forward backward)
+        set(_source "${CMAKE_CURRENT_SOURCE_DIR}/csrc/gpu/morphology/${_kernels}_kernels.cu")
+        foreach(_target IN LISTS SERRON_ROCM_ARCHS ITEMS amdgcnspirv)
+            set(_image "${_serron_image_dir}/${_kernels}_${_target}.img")
+            add_custom_command(
+                    OUTPUT "${_image}"
+                    COMMAND "${CMAKE_COMMAND}" -E make_directory "${_serron_image_dir}"
+                    COMMAND "${SERRON_HIPCC}" ${SERRON_HIPCC_FLAGS} -x hip -std=c++20 "--offload-arch=${_target}"
+                            -DTORCH_STABLE_ONLY -DTORCH_TARGET_VERSION=${SERRON_TORCH_TARGET_HEX}ULL
+                            ${_serron_image_includes} -M -MT "${_image}" -MF "${_image}.d" "${_source}"
+                    COMMAND "${SERRON_HIPCC}" ${SERRON_HIPCC_FLAGS} -x hip -O3 -std=c++20
+                            "--offload-arch=${_target}" --offload-device-only -c
+                            -DTORCH_STABLE_ONLY -DTORCH_TARGET_VERSION=${SERRON_TORCH_TARGET_HEX}ULL
+                            ${_serron_image_includes} -o "${_image}" "${_source}"
+                    DEPFILE "${_image}.d"
+                    MAIN_DEPENDENCY "${_source}"
+                    COMMENT "Building the ${_kernels} kernels for ${_target}"
+                    VERBATIM
+            )
+            list(APPEND _serron_rocm_images "${_image}")
+        endforeach()
+    endforeach()
+    add_custom_target(_serron_rocm_images ALL DEPENDS ${_serron_rocm_images})
     list(APPEND _serron_targets _C_rocm)
     list(APPEND _serron_compiled_targets _C_rocm)
 endif()
