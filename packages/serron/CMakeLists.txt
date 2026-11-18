@@ -75,24 +75,21 @@ if(SERRON_CUDA)
 endif()
 
 
-option(SERRON_ROCM "Build the ROCm backend" OFF)
 set(SERRON_ROCM_ROOT "" CACHE PATH "ROCm install path; else ROCM_PATH, HIP_PATH or /opt/rocm")
+if(SERRON_ROCM_ROOT)
+    find_program(_serron_hipcc_probe hipcc HINTS "${SERRON_ROCM_ROOT}/bin" NO_DEFAULT_PATH)
+else()
+    find_program(_serron_hipcc_probe hipcc HINTS ENV ROCM_PATH ENV HIP_PATH PATH_SUFFIXES bin)
+endif()
+if(_serron_hipcc_probe AND UNIX)
+    set(_serron_rocm_default ON)
+else()
+    set(_serron_rocm_default OFF)
+endif()
+unset(_serron_hipcc_probe CACHE)
+option(SERRON_ROCM "Build the ROCm backend (requires hipcc)" ${_serron_rocm_default})
 if(SERRON_ROCM)
-    if(SERRON_ROCM_ROOT)
-        find_path(SERRON_HIP_INCLUDE_DIR hip/hip_runtime_api.h HINTS "${SERRON_ROCM_ROOT}" PATH_SUFFIXES include
-                NO_DEFAULT_PATH)
-    else()
-        find_path(SERRON_HIP_INCLUDE_DIR hip/hip_runtime_api.h HINTS ENV ROCM_PATH ENV HIP_PATH PATHS /opt/rocm
-                PATH_SUFFIXES include)
-    endif()
-    if(NOT SERRON_HIP_INCLUDE_DIR)
-        message(FATAL_ERROR "serron: SERRON_ROCM is ON but hip/hip_runtime_api.h was not found!")
-    endif()
-    message(STATUS "serron: building the ROCm backend (HIP headers in ${SERRON_HIP_INCLUDE_DIR})")
-
-    # ROCm kernels are built for common archs + portable AMD GCN SPIR-V
-    set(SERRON_ROCM_ARCHS "gfx90a;gfx942;gfx950;gfx1100;gfx1201" CACHE STRING
-            "GPU architectures to build native ROCm kernel images for; the portable image covers the rest")
+    # The compiler decides release: its install root also supplies the headers and device libraries.
     if(SERRON_ROCM_ROOT)
         find_program(SERRON_HIPCC hipcc HINTS "${SERRON_ROCM_ROOT}/bin" NO_DEFAULT_PATH)
     else()
@@ -101,9 +98,19 @@ if(SERRON_ROCM)
     if(NOT SERRON_HIPCC)
         message(FATAL_ERROR "serron: SERRON_ROCM is ON but hipcc was not found.")
     endif()
-    get_filename_component(SERRON_HIPCC_ROOT "${SERRON_HIPCC}" REALPATH)
-    get_filename_component(SERRON_HIPCC_ROOT "${SERRON_HIPCC_ROOT}" DIRECTORY)
-    get_filename_component(SERRON_HIPCC_ROOT "${SERRON_HIPCC_ROOT}" DIRECTORY)
+    # ROCm kernels are built for common archs + portable AMD GCN SPIR-V
+    set(SERRON_ROCM_ARCHS "gfx90a;gfx942;gfx950;gfx1100;gfx1201" CACHE STRING
+            "GPU architectures to build native ROCm kernel images for; the portable image covers the rest")
+    get_filename_component(_serron_hipcc_real "${SERRON_HIPCC}" REALPATH)
+    get_filename_component(_serron_hipcc_bin "${_serron_hipcc_real}" DIRECTORY)
+    get_filename_component(_serron_hipcc_prefix "${_serron_hipcc_bin}" DIRECTORY)
+    find_path(SERRON_HIP_INCLUDE_DIR hip/hip_runtime_api.h HINTS "${_serron_hipcc_prefix}" PATH_SUFFIXES include
+            NO_DEFAULT_PATH)
+    if(NOT SERRON_HIP_INCLUDE_DIR)
+        message(FATAL_ERROR "serron: SERRON_ROCM is ON but hip/hip_runtime_api.h was not found next to ${SERRON_HIPCC}!")
+    endif()
+    message(STATUS "serron: building the ROCm backend (HIP headers in ${SERRON_HIP_INCLUDE_DIR})")
+    set(SERRON_HIPCC_ROOT "${_serron_hipcc_prefix}")
     execute_process(COMMAND "${SERRON_HIPCC}" "--rocm-path=${SERRON_HIPCC_ROOT}" --version
             OUTPUT_VARIABLE _serron_hipcc_version OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
     string(REGEX MATCH "[^\n]*clang version[^\n]*" _serron_hipcc_version "${_serron_hipcc_version}")
