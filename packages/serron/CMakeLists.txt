@@ -250,7 +250,7 @@ if(SERRON_ROCM)
                             -DTORCH_STABLE_ONLY -DTORCH_TARGET_VERSION=${SERRON_TORCH_TARGET_HEX}ULL
                             ${_serron_image_includes} -o "${_image}" "${_source}"
                     DEPFILE "${_image}.d"
-                    MAIN_DEPENDENCY "${_source}"
+                    DEPENDS "${_source}"
                     COMMENT "Building the ${_kernels} kernels for ${_target}"
                     VERBATIM
             )

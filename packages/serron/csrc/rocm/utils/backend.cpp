@@ -1,17 +1,109 @@
 // The HIP runtime's side of gpu/utils/backend.h.
 
 #include <gpu/utils/backend.h>
+#include <rocm/utils/images.h>
 #include <rocm/utils/runtime.hip.h>
 
 #include <compat/check.h>
 
 #include <cstdint>
+#include <cstdlib>
+#include <exception>
+#include <span>
+#include <string>
+#include <string_view>
 
 namespace serron {
 
 namespace {
 
 constexpr int kMaxDevices = 64;
+
+constexpr std::string_view kPortableTarget = "amdgcnspirv";
+
+/// The architecture of device @p index without its feature flags
+std::string device_architecture(const rocm::Runtime& hip, const int index) {
+    hipDeviceProp_tR0600 properties{};
+    rocm::check_hip(hip.hipGetDevicePropertiesR0600(&properties, index), "hipGetDeviceProperties");
+    const std::string architecture(properties.gcnArchName);
+    return architecture.substr(0, architecture.find(':'));
+}
+
+bool force_portable() {
+    const char* value = std::getenv("SERRON_ROCM_FORCE_SPIRV");
+    return value != nullptr && *value != '\0' && std::string_view(value) != "0";
+}
+
+/// "7.15.26333" for the runtime's version number, which is major * 10000000 + minor * 100000 + patch.
+std::string runtime_version(const rocm::Runtime& hip) {
+    int version = 0;
+    if (hip.hipRuntimeGetVersion(&version) != hipSuccess) {
+        return "unknown";
+    }
+    return std::to_string(version / 10000000) + "." + std::to_string(version / 100000 % 100) + "." +
+           std::to_string(version % 100000);
+}
+
+/// What was decided for one kernel file, with the architecture the decision was made for.
+struct Choice {
+    const rocm::EmbeddedImage* image = nullptr;
+    std::string architecture;
+};
+
+Choice choose_image(const KernelFile file) {
+    const rocm::Runtime& hip = rocm::runtime();
+    int count = 0;
+    rocm::check_hip(hip.hipGetDeviceCount(&count), "hipGetDeviceCount");
+    SERRON_CHECK(count > 0, "serron: no AMD GPU is visible");
+
+    const std::string architecture = device_architecture(hip, 0);
+    bool all_alike = true;
+    for (int device = 1; device < count && all_alike; ++device) {
+        all_alike = device_architecture(hip, device) == architecture;
+    }
+
+    const std::span<const rocm::EmbeddedImage> images = rocm::embedded_images(file);
+    const rocm::EmbeddedImage* portable = nullptr;
+    const rocm::EmbeddedImage* native = nullptr;
+    for (const rocm::EmbeddedImage& image : images) {
+        if (std::string_view(image.target) == kPortableTarget) {
+            portable = &image;
+        } else if (image.target == architecture) {
+            native = &image;
+        }
+    }
+    const bool use_native = native != nullptr && all_alike && !force_portable();
+    const rocm::EmbeddedImage* image = use_native ? native : portable;
+    SERRON_CHECK(image != nullptr, "serron: this build has no ROCm kernel image for ", architecture);
+    return {image, architecture};
+}
+
+/// The choice for @p file, made on first use and kept.
+const Choice& chosen(const KernelFile file) {
+    static const Choice forward = choose_image(KernelFile::kForward);
+    static const Choice backward = choose_image(KernelFile::kBackward);
+    switch (file) {
+    case KernelFile::kForward:
+        return forward;
+    case KernelFile::kBackward:
+        return backward;
+    }
+    SERRON_CHECK(false, "serron: unknown kernel file ", static_cast<int>(file));
+    return forward;
+}
+
+Library load_chosen(const KernelFile file) {
+    const auto& [image, architecture] = chosen(file);
+    const std::string what =
+        std::string(file == KernelFile::kForward ? "forward" : "backward") + " (" + image->target + " image)";
+    try {
+        return rocm::load_module(image->data(), what.c_str());
+    } catch (const std::exception& error) {
+        SERRON_CHECK(false, error.what(), "; GPU architecture ", architecture, ", HIP runtime ",
+                     runtime_version(rocm::runtime()), ". SERRON_ROCM_FORCE_SPIRV=1 loads the portable image instead.");
+        throw;
+    }
+}
 
 } // namespace
 
@@ -36,8 +128,17 @@ ContextGuard::~ContextGuard() {
 }
 
 Library kernel_library(const KernelFile file) {
-    // The images are built and embedded in a later change; until then there is nothing to load.
-    SERRON_CHECK(false, "serron: this build has no ROCm kernel images (kernel file ", static_cast<int>(file), ")");
+    switch (file) {
+    case KernelFile::kForward: {
+        static const Library library = load_chosen(KernelFile::kForward);
+        return library;
+    }
+    case KernelFile::kBackward: {
+        static const Library library = load_chosen(KernelFile::kBackward);
+        return library;
+    }
+    }
+    SERRON_CHECK(false, "serron: unknown kernel file ", static_cast<int>(file));
     return nullptr;
 }
 
@@ -84,5 +185,13 @@ void copy_to_host_async(void* host, const void* device, const size_t bytes, cons
 void synchronize(const Stream stream, const char* what) {
     rocm::check_hip(rocm::runtime().hipStreamSynchronize(static_cast<hipStream_t>(stream)), what);
 }
+
+namespace rocm {
+
+const char* selected_image_target(const KernelFile file) {
+    return chosen(file).image->target;
+}
+
+} // namespace rocm
 
 } // namespace serron

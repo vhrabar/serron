@@ -230,7 +230,8 @@ def test_environment_override_beats_the_table() -> None:
 def test_device_fingerprint_names_what_a_result_depends_on() -> None:
     fingerprint = device_fingerprint()
 
-    assert set(fingerprint) == {"name", "capability", "sm_count", "max_optin_smem", "cuda", "serron"}
+    toolkit = "rocm" if torch.version.hip else "cuda"
+    assert set(fingerprint) == {"name", "capability", "sm_count", "max_optin_smem", toolkit, "serron"}
     assert fingerprint["sm_count"] > 0
     assert fingerprint["max_optin_smem"] >= 48 * 1024
 

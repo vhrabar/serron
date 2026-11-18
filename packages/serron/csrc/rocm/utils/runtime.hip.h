@@ -17,6 +17,9 @@
     X(hipInit)                                                                                                         \
     X(hipGetErrorString)                                                                                               \
     X(hipGetDevice)                                                                                                    \
+    X(hipGetDeviceCount)                                                                                               \
+    X(hipGetDevicePropertiesR0600)                                                                                     \
+    X(hipRuntimeGetVersion)                                                                                            \
     X(hipSetDevice)                                                                                                    \
     X(hipDeviceGetAttribute)                                                                                           \
     X(hipModuleLoadData)                                                                                               \

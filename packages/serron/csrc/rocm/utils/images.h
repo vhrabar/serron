@@ -28,6 +28,15 @@ struct EmbeddedImage {
  */
 std::span<const EmbeddedImage> embedded_images(KernelFile file);
 
+/**
+ * The target of the image @c kernel_library loads for @p file: the GPU's architecture, or "amdgcnspirv" for the
+ * portable image. It loads nothing, and answers the same for the life of the process.
+ *
+ *
+ * @throws std::runtime_error  if there is no GPU or no image fits.
+ */
+const char* selected_image_target(KernelFile file);
+
 } // namespace serron::rocm
 
 #endif // SERRON_ROCM_IMAGES_H
