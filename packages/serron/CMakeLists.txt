@@ -258,6 +258,31 @@ if(SERRON_ROCM)
         endforeach()
     endforeach()
     add_custom_target(_serron_rocm_images ALL DEPENDS ${_serron_rocm_images})
+
+    # Pull every image into the library with .incbin, so it ships as one file
+    set(_serron_image_template [=[
+__asm__(".section .rodata\n.balign 16\n.globl @SYM@\n.hidden @SYM@\n@SYM@:\n.incbin \"@IMAGE@\"\n.globl @SYM@_end\n.hidden @SYM@_end\n@SYM@_end:\n.previous\n");
+extern "C" const unsigned char @SYM@[];
+extern "C" const unsigned char @SYM@_end[];
+]=])
+    set(SERRON_IMAGE_BLOCKS "")
+    foreach(_kernels IN ITEMS forward backward)
+        set(SERRON_IMAGE_ROWS_${_kernels} "")
+        foreach(_target IN LISTS SERRON_ROCM_ARCHS ITEMS amdgcnspirv)
+            set(_symbol "serron_image_${_kernels}_${_target}")
+            string(REPLACE "@SYM@" "${_symbol}" _block "${_serron_image_template}")
+            string(REPLACE "@IMAGE@" "${_serron_image_dir}/${_kernels}_${_target}.img" _block "${_block}")
+            string(APPEND SERRON_IMAGE_BLOCKS "${_block}")
+            string(APPEND SERRON_IMAGE_ROWS_${_kernels} "    {\"${_target}\", ${_symbol}, ${_symbol}_end},\n")
+        endforeach()
+    endforeach()
+    set(_serron_image_source "${CMAKE_CURRENT_BINARY_DIR}/rocm_generated/kernel_images.cpp")
+    configure_file(cmake/kernel_images.cpp.in "${_serron_image_source}" @ONLY)
+    target_sources(_C_rocm PRIVATE "${_serron_image_source}")
+
+    # The images are read at assembly time, so a rebuilt image has to rebuild this file too.
+    set_source_files_properties("${_serron_image_source}" PROPERTIES OBJECT_DEPENDS "${_serron_rocm_images}")
+    add_dependencies(_C_rocm _serron_rocm_images)
     list(APPEND _serron_targets _C_rocm)
     list(APPEND _serron_compiled_targets _C_rocm)
 endif()
@@ -312,6 +337,7 @@ if(SERRON_ROCM)
             csrc/gpu/utils/backend.h
             csrc/gpu/utils/launch.h
             csrc/gpu/utils/smem.h
+            csrc/rocm/utils/images.h
             csrc/rocm/utils/runtime.hip.h
     )
     set_source_files_properties(${_serron_rocm_headers} PROPERTIES HEADER_FILE_ONLY TRUE)
