@@ -47,7 +47,7 @@ torch = [
 dev = [
     "pytest",
     "pytest-benchmark",
-    "ruff==0.17.4",
+    "ruff==0.17.5",
     "pyrefly",
     "prek",
     "scikit-build-core",
