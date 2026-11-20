@@ -20,7 +20,7 @@ This is an [uv](https://docs.astral.sh/uv/) workspace:
 ## Install
 
 One prebuilt wheel per platform covers every supported interpreter, on Linux (x86_64,
-aarch64) and Windows (x86_64).
+aarch64) and Windows (x86_64, ARM64).
 
 ```bash
 pip install serron
@@ -44,7 +44,8 @@ The library links no HIP runtime; it uses the one torch already loaded. Set
 
 | Backend | Platforms                          | Torch build                  | Kernels                                                         |
 |---------|------------------------------------|------------------------------|-----------------------------------------------------------------|
-| CUDA    | Linux (x86_64, aarch64), Windows   | CUDA 12 or 13                | native for compute capability 7.5 to 12.0, PTX for 12.0 and up  |
+| CUDA    | Linux (x86_64, aarch64), Windows (x86_64) | CUDA 12 or 13 | native for compute capability 7.5 to 12.0, PTX for 12.0 and up |
+| CUDA    | Windows (ARM64)                    | CUDA 13 (NVIDIA's `+cu134` torch) | native for compute capability 8.9, 10.0 and 12.0, PTX for 12.0 and up |
 | ROCm    | Linux (x86_64)                     | ROCm 10| native for `gfx90a`, `gfx942`, `gfx950`, `gfx1100`, `gfx1201`; portable SPIR-V for the rest |
 | CPU     | Linux, Windows                     | any                          | C++                                                             |
 
