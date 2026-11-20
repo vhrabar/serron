@@ -77,7 +77,7 @@ rocm-sdk-device-gfx1201 = { index = "pytorch-rocm100", marker = "sys_platform ==
 dev = [
     "pytest",
     "pytest-benchmark",
-    "ruff==0.17.4",
+    "ruff==0.17.5",
     "pyrefly",
     "prek",
     "scikit-build-core",
