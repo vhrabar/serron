@@ -74,6 +74,56 @@ if(SERRON_CUDA)
     find_package(CUDAToolkit REQUIRED)
 endif()
 
+
+set(SERRON_ROCM_ROOT "" CACHE PATH "ROCm install path; else ROCM_PATH, HIP_PATH or /opt/rocm")
+if(SERRON_ROCM_ROOT)
+    find_program(_serron_hipcc_probe hipcc HINTS "${SERRON_ROCM_ROOT}/bin" NO_DEFAULT_PATH)
+else()
+    find_program(_serron_hipcc_probe hipcc HINTS ENV ROCM_PATH ENV HIP_PATH PATH_SUFFIXES bin)
+endif()
+if(_serron_hipcc_probe AND UNIX)
+    set(_serron_rocm_default ON)
+else()
+    set(_serron_rocm_default OFF)
+endif()
+unset(_serron_hipcc_probe CACHE)
+option(SERRON_ROCM "Build the ROCm backend (requires hipcc)" ${_serron_rocm_default})
+if(SERRON_ROCM)
+    # The compiler decides release: its install root also supplies the headers and device libraries.
+    if(SERRON_ROCM_ROOT)
+        find_program(SERRON_HIPCC hipcc HINTS "${SERRON_ROCM_ROOT}/bin" NO_DEFAULT_PATH)
+    else()
+        find_program(SERRON_HIPCC hipcc HINTS ENV ROCM_PATH ENV HIP_PATH PATHS /opt/rocm PATH_SUFFIXES bin)
+    endif()
+    if(NOT SERRON_HIPCC)
+        message(FATAL_ERROR "serron: SERRON_ROCM is ON but hipcc was not found.")
+    endif()
+    # ROCm kernels are built for common archs + portable AMD GCN SPIR-V
+    set(SERRON_ROCM_ARCHS "gfx90a;gfx942;gfx950;gfx1100;gfx1201" CACHE STRING
+            "GPU architectures to build native ROCm kernel images for; the portable image covers the rest")
+    get_filename_component(_serron_hipcc_real "${SERRON_HIPCC}" REALPATH)
+    get_filename_component(_serron_hipcc_bin "${_serron_hipcc_real}" DIRECTORY)
+    get_filename_component(_serron_hipcc_prefix "${_serron_hipcc_bin}" DIRECTORY)
+    find_path(SERRON_HIP_INCLUDE_DIR hip/hip_runtime_api.h HINTS "${_serron_hipcc_prefix}" PATH_SUFFIXES include
+            NO_DEFAULT_PATH)
+    if(NOT SERRON_HIP_INCLUDE_DIR)
+        message(FATAL_ERROR "serron: SERRON_ROCM is ON but hip/hip_runtime_api.h was not found next to ${SERRON_HIPCC}!")
+    endif()
+    message(STATUS "serron: building the ROCm backend (HIP headers in ${SERRON_HIP_INCLUDE_DIR})")
+    set(SERRON_HIPCC_ROOT "${_serron_hipcc_prefix}")
+    execute_process(COMMAND "${SERRON_HIPCC}" "--rocm-path=${SERRON_HIPCC_ROOT}" --version
+            OUTPUT_VARIABLE _serron_hipcc_version OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    string(REGEX MATCH "[^\n]*clang version[^\n]*" _serron_hipcc_version "${_serron_hipcc_version}")
+
+    find_path(SERRON_ROCM_DEVICE_LIBS ocml.bc HINTS "${SERRON_HIPCC_ROOT}" NO_DEFAULT_PATH
+            PATH_SUFFIXES amdgcn/bitcode lib/amdgcn/bitcode lib/llvm/amdgcn/bitcode)
+    set(SERRON_HIPCC_FLAGS "--rocm-path=${SERRON_HIPCC_ROOT}")
+    if(SERRON_ROCM_DEVICE_LIBS)
+        list(APPEND SERRON_HIPCC_FLAGS "--rocm-device-lib-path=${SERRON_ROCM_DEVICE_LIBS}")
+    endif()
+    message(STATUS "serron: ROCm kernel images built by ${SERRON_HIPCC} (${_serron_hipcc_version}) for ${SERRON_ROCM_ARCHS} and AMD GCN SPIR-V")
+endif()
+
 execute_process(
         COMMAND ${Python_EXECUTABLE} -c "import torch; print(torch.__version__.split('+')[0])"
         OUTPUT_VARIABLE SERRON_TORCH_VERSION
@@ -83,6 +133,11 @@ if(SERRON_CUDA)
     set(SERRON_WITH_CUDA_PY True)
 else()
     set(SERRON_WITH_CUDA_PY False)
+endif()
+if(SERRON_ROCM)
+    set(SERRON_WITH_ROCM_PY True)
+else()
+    set(SERRON_WITH_ROCM_PY False)
 endif()
 # Restrict the extension to the torch stable ABI
 option(SERRON_STABLE_ABI "Build against the torch stable ABI only" ON)
@@ -131,7 +186,7 @@ if(SERRON_CUDA)
     set(_serron_fatbin_headers)
     foreach(_kernels IN ITEMS forward backward)
         set(_fatbin_target _serron_${_kernels}_fatbin)
-        add_library(${_fatbin_target} OBJECT csrc/cuda/morphology/${_kernels}_kernels.cu)
+        add_library(${_fatbin_target} OBJECT csrc/gpu/morphology/${_kernels}_kernels.cu)
         set_target_properties(${_fatbin_target} PROPERTIES CUDA_FATBIN_COMPILATION ON)
         if(WIN32)
             target_compile_definitions(${_fatbin_target} PRIVATE C10_USING_CUSTOM_GENERATED_MACROS)
@@ -156,16 +211,87 @@ if(SERRON_CUDA)
     endforeach()
 
     add_library(_C_cuda SHARED
-            csrc/cuda/bindings.cpp
-            csrc/cuda/morphology/operators.cpp
-            csrc/cuda/morphology/backward.cpp
-            csrc/cuda/morphology/dispatch_info.cpp
+            csrc/gpu/bindings.cpp
+            csrc/gpu/morphology/operators.cpp
+            csrc/gpu/morphology/backward.cpp
+            csrc/gpu/morphology/dispatch_info.cpp
+            csrc/cuda/utils/backend.cpp
             csrc/cuda/utils/driver.cpp
             ${_serron_fatbin_headers}
     )
     target_include_directories(_C_cuda PRIVATE "${_serron_generated_dir}")
     list(APPEND _serron_targets _C_cuda)
     list(APPEND _serron_compiled_targets _C_cuda)
+endif()
+
+if(SERRON_ROCM)
+    add_library(_C_rocm SHARED
+            csrc/gpu/bindings.cpp
+            csrc/gpu/morphology/operators.cpp
+            csrc/gpu/morphology/backward.cpp
+            csrc/gpu/morphology/dispatch_info.cpp
+            csrc/rocm/utils/backend.cpp
+            csrc/rocm/utils/runtime.cpp
+    )
+    target_include_directories(_C_rocm PRIVATE "${SERRON_HIP_INCLUDE_DIR}")
+
+    # One code object per architecture and one portable image per kernel file
+    set(_serron_image_dir "${CMAKE_CURRENT_BINARY_DIR}/rocm_images")
+    set(_serron_image_includes "-I${CMAKE_CURRENT_SOURCE_DIR}/csrc" "-I${CMAKE_CURRENT_SOURCE_DIR}/csrc/compat")
+    foreach(_dir IN LISTS TORCH_INCLUDE_DIRS)
+        list(APPEND _serron_image_includes "-I${_dir}")
+    endforeach()
+    set(_serron_rocm_images)
+    foreach(_kernels IN ITEMS forward backward)
+        set(_source "${CMAKE_CURRENT_SOURCE_DIR}/csrc/gpu/morphology/${_kernels}_kernels.cu")
+        foreach(_target IN LISTS SERRON_ROCM_ARCHS ITEMS amdgcnspirv)
+            set(_image "${_serron_image_dir}/${_kernels}_${_target}.img")
+            add_custom_command(
+                    OUTPUT "${_image}"
+                    COMMAND "${CMAKE_COMMAND}" -E make_directory "${_serron_image_dir}"
+                    COMMAND "${SERRON_HIPCC}" ${SERRON_HIPCC_FLAGS} -x hip -std=c++20 "--offload-arch=${_target}"
+                            -DTORCH_STABLE_ONLY -DTORCH_TARGET_VERSION=${SERRON_TORCH_TARGET_HEX}ULL
+                            ${_serron_image_includes} -M -MT "${_image}" -MF "${_image}.d" "${_source}"
+                    COMMAND "${SERRON_HIPCC}" ${SERRON_HIPCC_FLAGS} -x hip -O3 -std=c++20
+                            "--offload-arch=${_target}" --offload-device-only -c
+                            -DTORCH_STABLE_ONLY -DTORCH_TARGET_VERSION=${SERRON_TORCH_TARGET_HEX}ULL
+                            ${_serron_image_includes} -o "${_image}" "${_source}"
+                    DEPFILE "${_image}.d"
+                    DEPENDS "${_source}"
+                    COMMENT "Building the ${_kernels} kernels for ${_target}"
+                    VERBATIM
+            )
+            list(APPEND _serron_rocm_images "${_image}")
+        endforeach()
+    endforeach()
+    add_custom_target(_serron_rocm_images ALL DEPENDS ${_serron_rocm_images})
+
+    # Pull every image into the library with .incbin, so it ships as one file
+    set(_serron_image_template [=[
+__asm__(".section .rodata\n.balign 16\n.globl @SYM@\n.hidden @SYM@\n@SYM@:\n.incbin \"@IMAGE@\"\n.globl @SYM@_end\n.hidden @SYM@_end\n@SYM@_end:\n.previous\n");
+extern "C" const unsigned char @SYM@[];
+extern "C" const unsigned char @SYM@_end[];
+]=])
+    set(SERRON_IMAGE_BLOCKS "")
+    foreach(_kernels IN ITEMS forward backward)
+        set(SERRON_IMAGE_ROWS_${_kernels} "")
+        foreach(_target IN LISTS SERRON_ROCM_ARCHS ITEMS amdgcnspirv)
+            set(_symbol "serron_image_${_kernels}_${_target}")
+            string(REPLACE "@SYM@" "${_symbol}" _block "${_serron_image_template}")
+            string(REPLACE "@IMAGE@" "${_serron_image_dir}/${_kernels}_${_target}.img" _block "${_block}")
+            string(APPEND SERRON_IMAGE_BLOCKS "${_block}")
+            string(APPEND SERRON_IMAGE_ROWS_${_kernels} "    {\"${_target}\", ${_symbol}, ${_symbol}_end},\n")
+        endforeach()
+    endforeach()
+    set(_serron_image_source "${CMAKE_CURRENT_BINARY_DIR}/rocm_generated/kernel_images.cpp")
+    configure_file(cmake/kernel_images.cpp.in "${_serron_image_source}" @ONLY)
+    target_sources(_C_rocm PRIVATE "${_serron_image_source}")
+
+    # The images are read at assembly time, so a rebuilt image has to rebuild this file too.
+    set_source_files_properties("${_serron_image_source}" PROPERTIES OBJECT_DEPENDS "${_serron_rocm_images}")
+    add_dependencies(_C_rocm _serron_rocm_images)
+    list(APPEND _serron_targets _C_rocm)
+    list(APPEND _serron_compiled_targets _C_rocm)
 endif()
 
 # Headers are listed only so IDEs index them; they are not compiled on their own.
@@ -187,22 +313,42 @@ target_sources(_C PRIVATE ${_serron_headers})
 if(SERRON_CUDA)
     set(_serron_cuda_headers
             csrc/compat/atomic.cuh
-            csrc/cuda/utils/border_mode.h
-            csrc/cuda/utils/boundaries.cuh
-            csrc/cuda/utils/declarations.h
+            csrc/gpu/utils/border_mode.h
+            csrc/gpu/utils/boundaries.cuh
+            csrc/gpu/utils/declarations.h
+            csrc/cuda/utils/device_runtime.h
             csrc/cuda/utils/driver.h
-            csrc/cuda/utils/launch.h
-            csrc/cuda/utils/smem.h
-            csrc/cuda/morphology/arg_tap.h
-            csrc/cuda/morphology/entry_points.h
-            csrc/cuda/morphology/enums.h
-            csrc/cuda/morphology/kernel_tables.h
-            csrc/cuda/morphology/ops_policy.cuh
-            csrc/cuda/morphology/scan.cuh
-            csrc/cuda/morphology/separable.h
+            csrc/cuda/utils/shuffle.cuh
+            csrc/gpu/utils/backend.h
+            csrc/gpu/utils/device_runtime.h
+            csrc/gpu/utils/launch.h
+            csrc/gpu/utils/shuffle.cuh
+            csrc/gpu/utils/smem.h
+            csrc/rocm/utils/device_runtime.hip.h
+            csrc/rocm/utils/runtime.hip.h
+            csrc/rocm/utils/shuffle.hip.h
+            csrc/gpu/morphology/arg_tap.h
+            csrc/gpu/morphology/entry_points.h
+            csrc/gpu/morphology/enums.h
+            csrc/gpu/morphology/kernel_tables.h
+            csrc/gpu/morphology/ops_policy.cuh
+            csrc/gpu/morphology/scan.cuh
+            csrc/gpu/morphology/separable.h
     )
     set_source_files_properties(${_serron_cuda_headers} PROPERTIES HEADER_FILE_ONLY TRUE)
     target_sources(_C_cuda PRIVATE ${_serron_cuda_headers})
+endif()
+
+if(SERRON_ROCM)
+    set(_serron_rocm_headers
+            csrc/gpu/utils/backend.h
+            csrc/gpu/utils/launch.h
+            csrc/gpu/utils/smem.h
+            csrc/rocm/utils/images.h
+            csrc/rocm/utils/runtime.hip.h
+    )
+    set_source_files_properties(${_serron_rocm_headers} PROPERTIES HEADER_FILE_ONLY TRUE)
+    target_sources(_C_rocm PRIVATE ${_serron_rocm_headers})
 endif()
 
 set(SERRON_CUDA_NVCC_THREADS 1 CACHE STRING "nvcc --threads (per-.cu arch parallelism)")
@@ -259,6 +405,10 @@ target_link_libraries(_C PRIVATE "${SERRON_TORCH_CPU_LIBRARY}")
 if(SERRON_CUDA)
     target_include_directories(_C_cuda PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
     target_link_libraries(_C_cuda PRIVATE "${SERRON_TORCH_CPU_LIBRARY}" ${CMAKE_DL_LIBS})
+endif()
+
+if(SERRON_ROCM)
+    target_link_libraries(_C_rocm PRIVATE "${SERRON_TORCH_CPU_LIBRARY}" ${CMAKE_DL_LIBS})
 endif()
 
 # On Windows the .dll is a RUNTIME artifact, which would otherwise land in bin/ outside the package.

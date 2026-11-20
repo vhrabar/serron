@@ -63,32 +63,6 @@ const Driver& driver();
  */
 void check_cu(CUresult result, const char* what);
 
-/**
- * Makes @p device's primary context current on this thread for the guard's lifetime.
- *
- * The driver API works on the calling thread's current context, which torch does not guarantee: a thread that has
- * not touched CUDA through the runtime yet may have none. When the current context already belongs to @p device the
- * guard does nothing.
- */
-class CurrentContextGuard {
-  public:
-    explicit CurrentContextGuard(int device_index);
-    ~CurrentContextGuard();
-
-    CurrentContextGuard(const CurrentContextGuard&) = delete;
-    CurrentContextGuard& operator=(const CurrentContextGuard&) = delete;
-
-    /// The device the guard made current, as a driver handle.
-    CUdevice device() const {
-        return device_;
-    }
-
-  private:
-    CUdevice device_ = 0;
-    CUcontext previous_ = nullptr;
-    bool restore_ = false;
-};
-
 /// Driver handle of device @p device_index.
 CUdevice device_handle(int device_index);
 

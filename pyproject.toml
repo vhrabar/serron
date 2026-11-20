@@ -25,8 +25,18 @@ url = "https://download.pytorch.org/whl/cu132"
 explicit = true
 
 [[tool.uv.index]]
+name = "pytorch-cu134"
+url = "https://download.pytorch.org/whl/cu134"
+explicit = true
+
+[[tool.uv.index]]
 name = "nvidia-cu134-win-arm64"
 url = "https://pypi.nvidia.com/nvtorch_oot/"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-rocm100"
+url = "https://download.pytorch.org/whl/rocm10.0"
 explicit = true
 
 [tool.uv.workspace]
@@ -40,14 +50,34 @@ torch = [
     { index = "pytorch-cu129", group = "cu129" },
     { index = "pytorch-cu132", group = "cu132" },
     { index = "pytorch-cu132", group = "cu132-newest" },
+    { index = "pytorch-cu134", group = "cu134", marker = "platform_machine == 'x86_64' or platform_machine == 'AMD64'" },
     { index = "nvidia-cu134-win-arm64", group = "cu134-win-arm64", marker = "sys_platform == 'win32' and platform_machine == 'ARM64'" },
+
+    { index = "pytorch-rocm100", group = "rocm-gfx90a", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+    { index = "pytorch-rocm100", group = "rocm-gfx942", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+    { index = "pytorch-rocm100", group = "rocm-gfx950", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+    { index = "pytorch-rocm100", group = "rocm-gfx1036", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+    { index = "pytorch-rocm100", group = "rocm-gfx1100", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+    { index = "pytorch-rocm100", group = "rocm-gfx1201", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
 ]
+
+
+triton-rocm = { index = "pytorch-rocm100", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" }
+rocm = { index = "pytorch-rocm100", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" }
+rocm-sdk-core = { index = "pytorch-rocm100", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" }
+rocm-sdk-libraries = { index = "pytorch-rocm100", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" }
+rocm-sdk-device-gfx90a = { index = "pytorch-rocm100", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" }
+rocm-sdk-device-gfx942 = { index = "pytorch-rocm100", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" }
+rocm-sdk-device-gfx950 = { index = "pytorch-rocm100", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" }
+rocm-sdk-device-gfx1036 = { index = "pytorch-rocm100", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" }
+rocm-sdk-device-gfx1100 = { index = "pytorch-rocm100", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" }
+rocm-sdk-device-gfx1201 = { index = "pytorch-rocm100", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" }
 
 [dependency-groups]
 dev = [
     "pytest",
     "pytest-benchmark",
-    "ruff==0.17.4",
+    "ruff==0.17.5",
     "pyrefly",
     "prek",
     "scikit-build-core",
@@ -59,11 +89,67 @@ cu129 = ["torch==2.13.*"]
 cu132 = ["torch==2.13.*"]
 cpu-newest = ["torch>=2.14"]
 cu132-newest = ["torch>=2.14"]
+rocm-gfx90a = [
+    "torch>=2.14; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "triton-rocm; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm[libraries]==10.0.*; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm-sdk-core; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm-sdk-libraries; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm[device-gfx90a]==10.0.*; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm-sdk-device-gfx90a; sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+rocm-gfx942 = [
+    "torch>=2.14; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "triton-rocm; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm[libraries]==10.0.*; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm-sdk-core; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm-sdk-libraries; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm[device-gfx942]==10.0.*; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm-sdk-device-gfx942; sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+rocm-gfx950 = [
+    "torch>=2.14; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "triton-rocm; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm[libraries]==10.0.*; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm-sdk-core; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm-sdk-libraries; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm[device-gfx950]==10.0.*; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm-sdk-device-gfx950; sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+rocm-gfx1036 = [
+    "torch>=2.14; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "triton-rocm; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm[libraries]==10.0.*; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm-sdk-core; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm-sdk-libraries; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm[device-gfx1036]==10.0.*; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm-sdk-device-gfx1036; sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+rocm-gfx1100 = [
+    "torch>=2.14; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "triton-rocm; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm[libraries]==10.0.*; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm-sdk-core; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm-sdk-libraries; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm[device-gfx1100]==10.0.*; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm-sdk-device-gfx1100; sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+rocm-gfx1201 = [
+    "torch>=2.14; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "triton-rocm; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm[libraries]==10.0.*; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm-sdk-core; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm-sdk-libraries; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm[device-gfx1201]==10.0.*; sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "rocm-sdk-device-gfx1201; sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+cu134 = ["torch>=2.15"]
 cu134-win-arm64 = ["torch>=2.14"]
 
 [tool.uv]
+override-dependencies = ["rocm[libraries]==10.0.*; sys_platform == 'linux' and platform_machine == 'x86_64'"]
 no-build-isolation-package = ["serron"]
-default-groups = ["dev", "cu132-newest"]
+default-groups = ["dev"]
 conflicts = [
     [
         { group = "cpu" },
@@ -71,6 +157,13 @@ conflicts = [
         { group = "cu132" },
         { group = "cpu-newest" },
         { group = "cu132-newest" },
+        { group = "rocm-gfx90a" },
+        { group = "rocm-gfx942" },
+        { group = "rocm-gfx950" },
+        { group = "rocm-gfx1036" },
+        { group = "rocm-gfx1100" },
+        { group = "rocm-gfx1201" },
+        { group = "cu134" },
         { group = "cu134-win-arm64" },
     ],
 ]
@@ -125,7 +218,7 @@ docstring-code-format = true
 preset            = "strict"
 python-version    = "3.12"
 search-path       = [".", "packages/serron/torch-ext"]
-project-excludes  = ["**/build/**", "dist/**", "cmake-build-*/**", "**/.venv/**"]
+project-excludes  = ["**/build/**", "dist/**", "cmake-build-*/**", "**/.venv/**", "scripts/rocm/**"]
 ignore-missing-imports = ["cupy", "cupyx.*"]
 
 [tool.pyrefly.errors]

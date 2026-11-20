@@ -3,11 +3,12 @@
 ![Python](https://img.shields.io/badge/python-%E2%89%A53.12-blue?style=for-the-badge&logo=python)
 ![PyTorch](https://img.shields.io/badge/pytorch-%E2%89%A52.13-ee4c2c?style=for-the-badge&logo=pytorch)
 ![CUDA](https://img.shields.io/badge/cuda-12%20%7C%2013-76b900?style=for-the-badge&logo=nvidia)
+![ROCm](https://img.shields.io/badge/rocm-10-ed1c24?style=for-the-badge&logo=amd)
 ![PyPI Version](https://img.shields.io/pypi/v/serron?style=for-the-badge&logo=pypi&logoColor=orange)
 ![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge&logo=opensourceinitiative)
 
 
-Mathematical Morphology module for PyTorch (CUDA), providing differentiable operators and learnable network layers.
+Mathematical Morphology module for PyTorch (CUDA and ROCm), providing differentiable operators and learnable network layers.
 
 ## Layout
 
@@ -19,7 +20,7 @@ This is an [uv](https://docs.astral.sh/uv/) workspace:
 ## Install
 
 One prebuilt wheel per platform covers every supported interpreter, on Linux (x86_64,
-aarch64) and Windows (x86_64).
+aarch64) and Windows (x86_64, ARM64).
 
 ```bash
 pip install serron
@@ -35,10 +36,23 @@ CUDA 13: they bind to the NVIDIA driver at runtime rather than linking a CUDA ru
 only requirement is a driver supporting CUDA 12.0 or newer (R525 / 525.60.13 on Linux,
 528.33 on Windows).
 
+On AMD GPUs (Linux x86_64), the wheel also carries a ROCm library, used when the installed torch is a
+ROCm 10 build. Kernel images are embedded for `gfx90a`, `gfx942`, `gfx950`, `gfx1100` and `gfx1201`,
+plus a portable SPIR-V image that other architectures compile when the kernels load.
+The library links no HIP runtime; it uses the one torch already loaded. Set
+`SERRON_ROCM_FORCE_SPIRV=1` to use the portable image even where a native one exists.
+
+| Backend | Platforms                          | Torch build                  | Kernels                                                         |
+|---------|------------------------------------|------------------------------|-----------------------------------------------------------------|
+| CUDA    | Linux (x86_64, aarch64), Windows (x86_64) | CUDA 12 or 13 | native for compute capability 7.5 to 12.0, PTX for 12.0 and up |
+| CUDA    | Windows (ARM64)                    | CUDA 13 (NVIDIA's `+cu134` torch) | native for compute capability 8.9, 10.0 and 12.0, PTX for 12.0 and up |
+| ROCm    | Linux (x86_64)                     | ROCm 10| native for `gfx90a`, `gfx942`, `gfx950`, `gfx1100`, `gfx1201`; portable SPIR-V for the rest |
+| CPU     | Linux, Windows                     | any                          | C++                                                             |
+
 ## Usage
 
-Serron works on standard PyTorch tensors laid out as `(N, C, H, W)` and living on a CUDA
-or CPU device.
+Serron works on standard PyTorch tensors laid out as `(N, C, H, W)` and living on a CUDA,
+ROCm or CPU device (ROCm devices are also addressed as `"cuda"` in torch).
 
 ### Functional operators
 
@@ -247,13 +261,13 @@ cd serron
 
 `torch` is pulled from a specific wheel index via mutually-exclusive dependency groups,
 one per backend and end of the supported range: `cu132` / `cpu` at the oldest torch the
-kernels target, `cu132-newest` / `cpu-newest` at the current release. `cu132-newest` is
-enabled by default, so plain `uv sync` gives the CUDA 13.2 build against the newest torch.
-Because the groups conflict, selecting another one means turning the default off, which
-`--no-default-groups` does in one step:
+kernels target, `cu132-newest` / `cpu-newest` at the current release. Only `dev` is enabled
+by default, so a torch group is always chosen explicitly. `cu134` (x86_64 and AMD64) and the
+`rocm-<arch>` groups (Linux x86_64, one per GPU architecture) follow the same rule.
+`--no-default-groups` keeps the command independent of whatever is enabled by default:
 
 ```bash
-uv sync                                                   # CUDA, newest torch
+uv sync --no-default-groups --group dev --group cu132-newest # CUDA, newest torch
 uv sync --no-default-groups --group dev --group cpu-newest # CPU-only, newest torch
 uv sync --no-default-groups --group dev --group cu132      # CUDA, oldest supported torch
 uv sync --no-default-groups --group dev --group cpu        # CPU-only, oldest supported torch
@@ -265,6 +279,9 @@ On Windows on ARM, the `cu134-win-arm64` group pulls NVIDIA's `+cu134` torch whe
 ```bash
 uv sync --no-default-groups --group dev --group cu134-win-arm64 # Windows on ARM, CUDA 13.4
 ```
+
+On Linux x86_64, AMD GPUs use `rocm-<arch code>` groups: `rocm-gfx90a`, `rocm-gfx942`, `rocm-gfx950`,
+`rocm-gfx1036`, `rocm-gfx1100`, `rocm-gfx1201`.
 
 ### Building the wheel
 
@@ -278,8 +295,19 @@ uv sync --no-install-workspace
 uv build --package serron --wheel --no-build-isolation
 ```
 
+The ROCm library is built next to it whenever `hipcc` is found, the same way the CUDA one needs `nvcc`: from
+`SERRON_ROCM_ROOT`, `ROCM_PATH` or `HIP_PATH`, else on `PATH`. Pass `-DSERRON_ROCM=OFF` to skip it. No GPU is
+needed to build. Use ROCm 10.0's `hipcc` (the `rocm-sdk-core==10.0.*` pip package works): the compiler must not
+be newer than the ROCm runtime that loads the portable image, and torch's ROCm 10 wheels bring 10.0.
+`SERRON_ROCM_ARCHS` sets the native architecture list:
+
+```bash
+CMAKE_ARGS="-DSERRON_ROCM_ARCHS=gfx942;gfx1100" uv build --package serron --wheel --no-build-isolation
+scripts/check_rocm_linkage.sh dist/serron-*.whl
+```
+
 On a GPU-less machine, sync the CPU torch build instead; the extension then builds
-C++ only (no `nvcc` required):
+C++ only (no `nvcc` or `hipcc` required):
 
 ```bash
 uv sync --no-install-workspace --no-default-groups --group dev --group cpu-newest

@@ -16,7 +16,8 @@ import torch
 import serron
 from tests.conftest import requires_cuda
 
-pytestmark = requires_cuda
+# Under ROCm there is no per-thread context to clear
+pytestmark = [requires_cuda, pytest.mark.skipif(bool(torch.version.hip), reason="CUDA driver contexts do not exist under ROCm")]
 
 
 def _driver() -> ctypes.CDLL:
