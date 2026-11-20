@@ -42,6 +42,12 @@ plus a portable SPIR-V image that other architectures compile when the kernels l
 The library links no HIP runtime; it uses the one torch already loaded. Set
 `SERRON_ROCM_FORCE_SPIRV=1` to use the portable image even where a native one exists.
 
+| Backend | Platforms                          | Torch build                  | Kernels                                                         |
+|---------|------------------------------------|------------------------------|-----------------------------------------------------------------|
+| CUDA    | Linux (x86_64, aarch64), Windows   | CUDA 12 or 13                | native for compute capability 7.5 to 12.0, PTX for 12.0 and up  |
+| ROCm    | Linux (x86_64)                     | ROCm 10| native for `gfx90a`, `gfx942`, `gfx950`, `gfx1100`, `gfx1201`; portable SPIR-V for the rest |
+| CPU     | Linux, Windows                     | any                          | C++                                                             |
+
 ## Usage
 
 Serron works on standard PyTorch tensors laid out as `(N, C, H, W)` and living on a CUDA,

@@ -16,6 +16,7 @@ env:
   BUILD_PYTHON: "3.12"
   TORCH_INDEX: https://download.pytorch.org/whl/cu132
   ROCM_VERSION: "10.0.0"
+  ROCM_TORCH_INDEX: https://download.pytorch.org/whl/rocm10.0
   WIN_ARM64_CUDA_VERSION: "13.4"
   WIN_ARM64_TORCH_INDEX: https://pypi.nvidia.com/nvtorch_oot/
   PIP_RETRIES: "5"
@@ -270,6 +271,43 @@ jobs:
           print("serron", serron.__version__, "loads its CUDA kernels on torch", torch.__version__)
           EOF
 
+  smoke-test-rocm-load:
+    needs: [linux-wheels]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ env.BUILD_PYTHON }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: wheels-linux-x86_64
+          path: dist
+
+      - name: Install wheel with a ROCm 10 torch
+        run: |
+          uv venv rocm-env --python "${BUILD_PYTHON}"
+          echo 'rocm[libraries]==10.0.*' > rocm-override.txt
+          uv pip install --python rocm-env --index "${ROCM_TORCH_INDEX}" --override rocm-override.txt torch
+          uv pip install --python rocm-env --no-deps dist/serron-*.whl
+
+      - name: Import and check the ROCm kernels registered
+        working-directory: ${{ runner.temp }}
+        run: |
+          "${GITHUB_WORKSPACE}/rocm-env/bin/python" - <<'EOF'
+          import torch
+          import serron
+
+          assert torch.version.hip, torch.version.hip
+          assert torch.version.rocm.split(".")[0] == "10", torch.version.rocm
+          for op in ("erode", "dilate", "erode_backward", "dilate_backward"):
+              assert torch._C._dispatch_has_kernel_for_dispatch_key(f"serron::{op}", "CUDA"), op
+          print("serron", serron.__version__, "registers its ROCm kernels on torch", torch.__version__)
+          EOF
+
   # Windows wheel (x86_64)
   windows-wheel:
     needs: [verify]
@@ -387,7 +425,7 @@ jobs:
   # Attach every artifact to the GitHub Release
   attach-to-release:
     if: github.event_name == 'release'
-    needs: [sdist, linux-wheels, smoke-test-cpu, smoke-test-cuda-load, windows-wheel, windows-arm64-wheel]
+    needs: [sdist, linux-wheels, smoke-test-cpu, smoke-test-cuda-load, smoke-test-rocm-load, windows-wheel, windows-arm64-wheel]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8
