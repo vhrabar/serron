@@ -68,7 +68,7 @@ jobs:
 
       - name: Install ROCm
         id: rocm
-        uses: vhrabar/rocm-toolkit@v1.0.0
+        uses: vhrabar/rocm-toolkit@v1.1.0
         with:
           version: ${{ env.ROCM_VERSION }}
           gfx: ${{ env.ROCM_ARCHS }}

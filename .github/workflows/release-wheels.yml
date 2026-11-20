@@ -15,6 +15,7 @@ env:
   BUILD_PYTHON_TAG: cp312-cp312
   BUILD_PYTHON: "3.12"
   TORCH_INDEX: https://download.pytorch.org/whl/cu132
+  ROCM_VERSION: "10.0.0"
   WIN_ARM64_CUDA_VERSION: "13.4"
   WIN_ARM64_TORCH_INDEX: https://pypi.nvidia.com/nvtorch_oot/
   PIP_RETRIES: "5"
@@ -110,6 +111,17 @@ jobs:
           use-github-cache: false
           log-file-suffix: "${{ matrix.arch }}.txt"
 
+      - name: Install ROCm
+        if: matrix.arch == 'x86_64'
+        uses: vhrabar/rocm-toolkit@v1.1.0
+        with:
+          version: ${{ env.ROCM_VERSION }}
+          gfx: gfx90a,gfx942,gfx950,gfx1100,gfx1201
+
+      - name: Verify the ROCm compiler
+        if: matrix.arch == 'x86_64'
+        run: hipcc --version
+
       - name: Build wheel
         env:
           CUDA_HOME: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}
@@ -138,12 +150,20 @@ jobs:
             --exclude 'libcudart.so*' \
             --exclude 'libcublas*.so*' \
             --exclude 'libcuda.so*' \
-            --exclude 'libnvToolsExt.so*'
+            --exclude 'libnvToolsExt.so*' \
+            --exclude 'libamdhip64*.so*' \
+            --exclude 'libhiprtc*.so*'
 
       - name: Check CUDA linkage
         run: |
           export PATH="/opt/python/${{ env.BUILD_PYTHON_TAG }}/bin:${PATH}"
           scripts/check_cuda_linkage.sh dist/*.whl
+
+      - name: Check ROCm linkage and the embedded images
+        if: matrix.arch == 'x86_64'
+        run: |
+          export PATH="/opt/python/${{ env.BUILD_PYTHON_TAG }}/bin:${PATH}"
+          scripts/check_rocm_linkage.sh dist/*.whl
 
       - uses: actions/upload-artifact@v7
         with:

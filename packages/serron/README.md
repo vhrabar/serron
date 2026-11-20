@@ -1,6 +1,6 @@
 # Serron
 
-Mathematical Morphology module for PyTorch (CUDA), providing differentiable operators and learnable network layers.
+Mathematical Morphology module for PyTorch (CUDA and ROCm), providing differentiable operators and learnable network layers.
 
 ## Install
 
@@ -21,10 +21,16 @@ CUDA 13: they bind to the NVIDIA driver at runtime rather than linking a CUDA ru
 only requirement is a driver supporting CUDA 12.0 or newer (R525 / 525.60.13 on Linux,
 528.33 on Windows).
 
+On AMD GPUs (Linux x86_64), the wheel also carries a ROCm library, used when the installed torch is a
+ROCm 10 build. Kernel images are embedded for `gfx90a`, `gfx942`, `gfx950`, `gfx1100` and `gfx1201`,
+plus a portable SPIR-V image that other architectures compile when the kernels load.
+The library links no HIP runtime; it uses the one torch already loaded. Set
+`SERRON_ROCM_FORCE_SPIRV=1` to use the portable image even where a native one exists.
+
 ## Usage
 
-Serron works on standard PyTorch tensors laid out as `(N, C, H, W)` and living on a CUDA
-or CPU device.
+Serron works on standard PyTorch tensors laid out as `(N, C, H, W)` and living on a CUDA,
+ROCm or CPU device (ROCm devices are also addressed as `"cuda"` in torch).
 
 ### Functional operators
 
@@ -263,8 +269,19 @@ uv sync --no-install-workspace
 uv build --package serron --wheel --no-build-isolation
 ```
 
+The ROCm library is built next to it whenever `hipcc` is found, the same way the CUDA one needs `nvcc`: from
+`SERRON_ROCM_ROOT`, `ROCM_PATH` or `HIP_PATH`, else on `PATH`. Pass `-DSERRON_ROCM=OFF` to skip it. No GPU is
+needed to build. Use ROCm 10.0's `hipcc` (the `rocm-sdk-core==10.0.*` pip package works): the compiler must not
+be newer than the ROCm runtime that loads the portable image, and torch's ROCm 10 wheels bring 10.0.
+`SERRON_ROCM_ARCHS` sets the native architecture list:
+
+```bash
+CMAKE_ARGS="-DSERRON_ROCM_ARCHS=gfx942;gfx1100" uv build --package serron --wheel --no-build-isolation
+scripts/check_rocm_linkage.sh dist/serron-*.whl
+```
+
 On a GPU-less machine, sync the CPU torch build instead; the extension then builds
-C++ only (no `nvcc` required):
+C++ only (no `nvcc` or `hipcc` required):
 
 ```bash
 uv sync --no-install-workspace --no-default-groups --group dev --group cpu-newest
