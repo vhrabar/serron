@@ -1,11 +1,10 @@
 #ifndef SERRON_MORPHOLOGY_SCAN_CUH
 #define SERRON_MORPHOLOGY_SCAN_CUH
 
-#include <cuda/morphology/arg_tap.h>
-#include <cuda/std/cstdint>
-#include <cuda/utils/declarations.h>
-
-#include <cuda_runtime.h>
+#include <gpu/morphology/arg_tap.h>
+#include <gpu/utils/declarations.h>
+#include <gpu/utils/device_runtime.h>
+#include <gpu/utils/shuffle.cuh>
 
 #include <compat/acc_type.h>
 
@@ -24,8 +23,6 @@ namespace serron {
 template <typename Op, typename scalar_t, bool Forward>
 __device__ __forceinline__ void scan_chunk_warp(scalar_t* chunk, const int64_t k, const unsigned lane) {
     using acc_t = acc_type<scalar_t, true>;
-    constexpr unsigned kAll = 0xffffffffu;
-
     const auto neutral = Op::template neutral<acc_t>();
     const int64_t widths = (k + WARP_SIZE - 1) / WARP_SIZE;
     acc_t carry = neutral;
@@ -36,7 +33,7 @@ __device__ __forceinline__ void scan_chunk_warp(scalar_t* chunk, const int64_t k
         acc_t v = inside ? static_cast<acc_t>(chunk[idx]) : neutral;
 
         for (int d = 1; d < WARP_SIZE; d <<= 1) {
-            const acc_t other = Forward ? __shfl_up_sync(kAll, v, d) : __shfl_down_sync(kAll, v, d);
+            const acc_t other = Forward ? shfl_up(v, d) : shfl_down(v, d);
             const bool consumes = Forward ? lane >= static_cast<unsigned>(d) : lane + d < WARP_SIZE;
             if (consumes) {
                 v = Op::reduce(v, other);
@@ -47,7 +44,7 @@ __device__ __forceinline__ void scan_chunk_warp(scalar_t* chunk, const int64_t k
         if (inside) {
             chunk[idx] = static_cast<scalar_t>(v);
         }
-        carry = __shfl_sync(kAll, v, Forward ? WARP_SIZE - 1 : 0);
+        carry = shfl(v, Forward ? WARP_SIZE - 1 : 0);
     }
 }
 
@@ -96,8 +93,6 @@ __device__ __forceinline__ ArgTap<acc_t> arg_combine(const ArgTap<acc_t>& lo, co
  */
 template <typename Op, typename acc_t, bool Forward>
 __device__ __forceinline__ void arg_scan_chunk_warp(ArgTap<acc_t>* chunk, const int64_t k, const unsigned lane) {
-    constexpr unsigned kAll = 0xffffffffu;
-
     const ArgTap<acc_t> neutral{Op::template neutral<acc_t>(), 0};
     const int64_t widths = (k + WARP_SIZE - 1) / WARP_SIZE;
     ArgTap<acc_t> carry = neutral;
@@ -109,8 +104,8 @@ __device__ __forceinline__ void arg_scan_chunk_warp(ArgTap<acc_t>* chunk, const 
 
         for (int d = 1; d < WARP_SIZE; d <<= 1) {
             ArgTap<acc_t> other{};
-            other.val = Forward ? __shfl_up_sync(kAll, v.val, d) : __shfl_down_sync(kAll, v.val, d);
-            other.idx = Forward ? __shfl_up_sync(kAll, v.idx, d) : __shfl_down_sync(kAll, v.idx, d);
+            other.val = Forward ? shfl_up(v.val, d) : shfl_down(v.val, d);
+            other.idx = Forward ? shfl_up(v.idx, d) : shfl_down(v.idx, d);
 
             const bool consumes = Forward ? lane >= static_cast<unsigned>(d) : lane + d < WARP_SIZE;
             if (consumes) {
@@ -123,8 +118,8 @@ __device__ __forceinline__ void arg_scan_chunk_warp(ArgTap<acc_t>* chunk, const 
         if (inside) {
             chunk[idx] = v;
         }
-        carry.val = __shfl_sync(kAll, v.val, Forward ? WARP_SIZE - 1 : 0);
-        carry.idx = __shfl_sync(kAll, v.idx, Forward ? WARP_SIZE - 1 : 0);
+        carry.val = shfl(v.val, Forward ? WARP_SIZE - 1 : 0);
+        carry.idx = shfl(v.idx, Forward ? WARP_SIZE - 1 : 0);
     }
 }
 

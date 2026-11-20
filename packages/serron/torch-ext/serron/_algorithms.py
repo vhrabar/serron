@@ -6,12 +6,12 @@ from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _version
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 import torch
 
 from . import _flatness
-from ._cmake_ops import ops
+from ._cmake_ops import _gpu_backend, _rocm_version, ops
 from .enums import Algorithm
 
 __all__ = [
@@ -31,8 +31,9 @@ class DeviceFingerprint(TypedDict):
     capability: str
     sm_count: int
     max_optin_smem: int
-    cuda: str
     serron: str
+    cuda: NotRequired[str]
+    rocm: NotRequired[str]
 
 
 def _flat(kernel: torch.Tensor, flat: bool | None) -> bool:
@@ -103,23 +104,34 @@ def device_fingerprint(device: torch.device | int | None = None) -> DeviceFinger
     """
     What a tuning result depends on besides the problem: the GPU, the toolkit and this library.
 
-    :param device: CUDA device, the current one when ``None``.
-    :returns: JSON-serialisable fields for a cache key: device name, compute capability, SM count, opt-in shared
-    memory, CUDA version and serron version.
-    :raises RuntimeError: if CUDA is not available.
+    :param device: GPU device (CUDA or ROCm), the current one when ``None``.
+    :returns: JSON-serialisable fields for a cache key: device name, compute capability or ROCm architecture, SM
+    count, the most dynamic shared memory a block can use, serron version, and the CUDA or ROCm version.
+    :raises RuntimeError: if there is no GPU.
     """
     if not torch.cuda.is_available():
-        raise RuntimeError("serron: device_fingerprint needs a CUDA device")
+        raise RuntimeError("serron: device_fingerprint needs a GPU")
     props = torch.cuda.get_device_properties(device)
     try:
         serron_version = _version("serron")
     except PackageNotFoundError:
         serron_version = "unknown"
+
+    backend = _gpu_backend()
+    if backend is not None and backend[0] == "rocm":
+        return DeviceFingerprint(
+            name=props.name,
+            capability=str(props.gcnArchName).split(":")[0],
+            sm_count=props.multi_processor_count,
+            max_optin_smem=int(props.shared_memory_per_block),
+            serron=serron_version,
+            rocm=_rocm_version() or "unknown",
+        )
     return DeviceFingerprint(
         name=props.name,
         capability=f"{props.major}.{props.minor}",
         sm_count=props.multi_processor_count,
         max_optin_smem=int(getattr(props, "shared_memory_per_block_optin")),  # noqa: B009
-        cuda=torch.version.cuda or "unknown",
         serron=serron_version,
+        cuda=torch.version.cuda or "unknown",
     )

@@ -1,10 +1,9 @@
-#ifndef SERRON_CUDA_MORPHOLOGY_SEPARABLE_H
-#define SERRON_CUDA_MORPHOLOGY_SEPARABLE_H
+#ifndef SERRON_GPU_MORPHOLOGY_SEPARABLE_H
+#define SERRON_GPU_MORPHOLOGY_SEPARABLE_H
 
-#include <cuda/utils/declarations.h>
-#include <cuda/utils/driver.h>
-
-#include <cuda.h>
+#include <gpu/utils/backend.h>
+#include <gpu/utils/declarations.h>
+#include <gpu/utils/launch.h>
 
 #include <compat/check.h>
 #include <compat/flatness.h>
@@ -81,14 +80,10 @@ inline bool se_is_flat(const Tensor& kernel_c) {
 
     std::vector<char> host(static_cast<size_t>(n) * static_cast<size_t>(kernel_c.element_size()));
     const torch::stable::accelerator::DeviceGuard device_guard(kernel_c.get_device_index());
-    const CurrentContextGuard context_guard(kernel_c.get_device_index());
-    const auto stream =
-        static_cast<CUstream>(torch::stable::accelerator::getCurrentStream(kernel_c.get_device_index()).nativeHandle());
-    const Driver& cu = driver();
-    check_cu(cu.cuMemcpyDtoHAsync(host.data(), reinterpret_cast<CUdeviceptr>(kernel_c.const_data_ptr()), host.size(),
-                                  stream),
-             "structuring-element copy");
-    check_cu(cu.cuStreamSynchronize(stream), "structuring-element copy sync");
+    const ContextGuard context_guard(kernel_c.get_device_index());
+    const Stream stream = current_stream(kernel_c.get_device_index());
+    copy_to_host_async(host.data(), kernel_c.const_data_ptr(), host.size(), stream, "structuring-element copy");
+    synchronize(stream, "structuring-element copy sync");
 
     bool flat = false;
     THO_DISPATCH_V2(kernel_c.scalar_type(), "serron_se_is_flat_cuda",
@@ -110,4 +105,4 @@ inline bool resolve_flat(const std::optional<bool>& flat, const Tensor& kernel_c
 
 } // namespace serron
 
-#endif // SERRON_CUDA_MORPHOLOGY_SEPARABLE_H
+#endif // SERRON_GPU_MORPHOLOGY_SEPARABLE_H

@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- ROCm backend for AMD GPUs on Linux x86_64 (#67). The wheel carries a second library, `_C_rocm`, which serron loads
+    instead of `_C_cuda` when the installed torch is a ROCm 10 build. The kernels are built
+    when the wheel is built, not on the user's machine: one native image per architecture (`gfx90a`, `gfx942`,
+    `gfx950`, `gfx1100`, `gfx1201`) and one portable SPIR-V image for every other GPU (#72). The library links no HIP
+    runtime and uses the one torch already loaded (#73, #74).
+- `SERRON_ROCM_FORCE_SPIRV=1` makes the ROCm backend use the portable image where a native one exists (#72).
+- Calibration fingerprints and shipped seeds accept AMD architectures (`gfx942`, ...) next to CUDA compute
+    capabilities, so the two cannot share a cache entry. CUDA fingerprints are unchanged (#74).
+- Building from source builds the ROCm library whenever `hipcc` is found (`SERRON_ROCM_ROOT`, `ROCM_PATH`,
+    `HIP_PATH` or `PATH`), the way the CUDA one needs `nvcc`. Use ROCm 10.0's compiler, which must not be newer than
+    the runtime that loads the portable image. `-DSERRON_ROCM=OFF` skips it, `SERRON_ROCM_ARCHS` sets the native
+    architecture list (#73).
+- `rocm-gfx90a`, `rocm-gfx942`, `rocm-gfx950`, `rocm-gfx1036`, `rocm-gfx1100` and `rocm-gfx1201` dependency groups pull
+    torch's ROCm 10.0 wheels.
+- CI builds the ROCm library and checks its linkage and embedded kernel images on every change, and the release
+    workflow builds it into the Linux x86_64 wheel (#73, #75).
+
+### Changed
+
+- The separable scans no longer assume a warp of 32 lanes, so they also run on wave64 GPUs (checked on an MI300X).
+- The kernel sources moved to `csrc/gpu`, shared by the CUDA and ROCm builds, and the host launch code sits behind a
+    common driver layer (#69, #71). The CUDA behaviour is unchanged.
+
 ## [0.5.2] - 2026-11-13
 
 ### Added

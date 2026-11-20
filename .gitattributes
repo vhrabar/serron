@@ -4,5 +4,8 @@
 *.cuh text eol=lf
 *.hpp text eol=lf
 
+*.hip text eol=lf linguist-language=HIP
+*.hip.h text eol=lf linguist-language=HIP
+
 benchmarks/** -linguist-detectable
 tests/** -linguist-detectable

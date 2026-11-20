@@ -1,0 +1,114 @@
+name: ROCm Compile Check
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [dev, main]
+    paths:
+      - 'csrc/**'
+      - '**/*.cu'
+      - '**/*.cuh'
+      - '**/*.hip.h'
+      - '**/*.cpp'
+      - '**/*.h'
+      - '**/CMakeLists.txt'
+      - '**/torch-ext/**'
+      - 'scripts/check_rocm_linkage.sh'
+      - 'tests/test_rocm_library.py'
+      - '.github/workflows/build-rocm.yml'
+      - 'pyproject.toml'
+      - 'uv.lock'
+  pull_request:
+    branches: [dev, main]
+    paths:
+      - 'csrc/**'
+      - '**/*.cu'
+      - '**/*.cuh'
+      - '**/*.hip.h'
+      - '**/*.cpp'
+      - '**/*.h'
+      - '**/CMakeLists.txt'
+      - '**/torch-ext/**'
+      - 'scripts/check_rocm_linkage.sh'
+      - 'tests/test_rocm_library.py'
+      - '.github/workflows/build-rocm.yml'
+      - 'pyproject.toml'
+      - 'uv.lock'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  ROCM_VERSION: "10.0.0"
+  ROCM_CLANG_MAJOR: "23"
+  ROCM_ARCHS: "gfx90a,gfx942,gfx950,gfx1100,gfx1201"
+
+jobs:
+  rocm-build:
+    name: rocm-build (ROCm 10.0, ${{ matrix.torch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        torch: [cpu, cpu-newest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost /opt/hostedtoolcache/CodeQL
+          sudo apt-get clean
+          df -h
+
+      - name: Install ROCm
+        id: rocm
+        uses: vhrabar/rocm-toolkit@v1.1.0
+        with:
+          version: ${{ env.ROCM_VERSION }}
+          gfx: ${{ env.ROCM_ARCHS }}
+
+      - name: Verify the compiler
+        run: |
+          hipcc --version
+          clang_line="$(hipcc --version | grep -m1 'clang version')"
+          echo "$clang_line"
+          if ! grep -q "clang version ${ROCM_CLANG_MAJOR}\." <<<"$clang_line"; then
+            echo "::error::hipcc is not ROCm ${ROCM_VERSION}'s compiler (expected clang ${ROCM_CLANG_MAJOR})"
+            exit 1
+          fi
+
+      - name: Turn the architecture list into a CMake list
+        run: echo "ROCM_ARCHS_CMAKE=${ROCM_ARCHS//,/;}" >> "$GITHUB_ENV"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.14"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install build dependencies
+        run: uv sync --no-install-workspace --no-default-groups --group dev --group ${{ matrix.torch }}
+
+      - name: Build the wheel with the ROCm backend
+        run: uv build --package serron --wheel --no-build-isolation
+        env:
+          CMAKE_ARGS: >-
+            -DSERRON_CUDA=OFF -DSERRON_ROCM=ON
+            -DSERRON_ROCM_ROOT=${{ steps.rocm.outputs.ROCM_PATH }}
+            "-DSERRON_ROCM_ARCHS=${{ env.ROCM_ARCHS_CMAKE }}"
+          CMAKE_BUILD_PARALLEL_LEVEL: "4"
+
+      - name: Check ROCm linkage and the embedded images
+        run: scripts/check_rocm_linkage.sh dist/serron-*.whl
+
+      - name: Install the wheel and run the GPU-free tests
+        run: |
+          uv pip install --no-deps dist/serron-*.whl
+          uv run --no-sync pytest tests/test_rocm_library.py tests/test_loader.py tests/test_fingerprint_rocm.py -q

@@ -14,6 +14,8 @@ import torch
 
 _NAMESPACE = "serron"
 
+_MIN_ROCM = 10
+
 
 def _search_dirs() -> list[str]:
     dirs = [os.path.dirname(__file__)]
@@ -48,6 +50,7 @@ class _BuildInfo(Protocol):
     TORCH_TARGET_VERSION: str
     TORCH_VERSION: str
     STABLE_ABI: bool
+    WITH_ROCM: bool
 
 
 def _build_info() -> _BuildInfo | None:
@@ -99,6 +102,54 @@ def _check_torch_version() -> None:
         )
 
 
+def _gpu_backend() -> tuple[str, str] | None:
+    """
+    The GPU backend torch was built for, as ``("cuda" | "rocm", version)``, or ``None`` for a CPU build.
+
+    Both kinds of torch call their GPU device ``"cuda"``, so the version strings are what tells them apart.
+    """
+    hip = getattr(torch.version, "hip", None)
+    if hip:
+        return "rocm", hip
+    if torch.version.cuda:
+        return "cuda", torch.version.cuda
+    return None
+
+
+def _rocm_version() -> str:
+    """
+    The ROCm release the installed torch is built for.
+
+    ``torch.version.hip`` is the HIP runtime's own version, which is not the release (a ROCm 10 build reports 7.15
+    there), so ``torch.version.rocm`` is used when torch has it.
+    """
+    return getattr(torch.version, "rocm", None) or torch.version.hip or ""
+
+
+def _rocm_library() -> str:
+    """Path of ``_C_rocm`` for the installed ROCm torch; raises if the torch or the wheel cannot run it."""
+    version = _rocm_version()
+    if _release(version)[:1] < (_MIN_ROCM,):
+        raise ImportError(
+            f"Serron's ROCm backend needs ROCm {_MIN_ROCM} or newer, but torch {torch.__version__} is built for "
+            f"ROCm {version}. Install a torch built for ROCm {_MIN_ROCM} or newer."
+        )
+    path = _find_library("_C_rocm")
+    if path is not None:
+        return path
+    info = _build_info()
+    if info is not None and not getattr(info, "WITH_ROCM", False):
+        raise ImportError(
+            f"torch {torch.__version__} is built for ROCm {version}, but this Serron build has no ROCm backend "
+            f"(it was built without SERRON_ROCM). Install a Serron wheel that includes it, or rebuild with "
+            f"-DSERRON_ROCM=ON."
+        )
+    raise ImportError(
+        f"torch {torch.__version__} is built for ROCm {version}, but the compiled Serron '_C_rocm' extension was "
+        f"not found in {_search_dirs()}. Reinstall the package."
+    )
+
+
 def _load_c_extension() -> None:
     _check_torch_version()
 
@@ -109,8 +160,14 @@ def _load_c_extension() -> None:
         )
     _load(cpu_lib)
 
+    backend = _gpu_backend()
+    if backend is None:
+        return
+    if backend[0] == "rocm":
+        _load(_rocm_library())
+        return
     cuda_lib = _find_library("_C_cuda")
-    if cuda_lib is not None and torch.version.cuda is not None:
+    if cuda_lib is not None:
         _load(cuda_lib)
 
 

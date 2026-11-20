@@ -27,7 +27,7 @@ TORCH_LIBRARY_IMPL_EXPAND(TORCH_EXTENSION_NAME, CPU, ops) {
     ops.impl("dilate_backward", TORCH_BOX(&serron::dilate_backward_cpu));
 }
 
-// CUDA implementations are registered by the separate _C_cuda library (cuda/bindings.cpp), so this
+// CUDA implementations are registered by the separate _C_cuda library (gpu/bindings.cpp), so this
 // library links only what the stable shim needs and loads on CPU-only torch builds.
 
 // Autocast is registered from Python, in torch-ext/serron/_cmake_ops.py: the stable ABI has no equivalent of

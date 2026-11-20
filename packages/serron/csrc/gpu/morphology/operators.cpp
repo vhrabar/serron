@@ -1,22 +1,18 @@
 #include "ops.h"
 
-// Generated from forward_kernels.cu by cmake/embed_fatbin.cmake.
-#include <cuda/morphology/algorithm.h>
-#include <cuda/morphology/entry_points.h>
-#include <cuda/morphology/enums.h>
-#include <cuda/morphology/kernel_tables.h>
-#include <cuda/morphology/separable.h>
-#include <cuda/morphology/thresholds.h>
-#include <cuda/utils/border_mode.h>
-#include <cuda/utils/declarations.h>
-#include <cuda/utils/driver.h>
-#include <cuda/utils/launch.h>
-#include <cuda/utils/smem.h>
-
-#include <cuda.h>
+#include <gpu/morphology/algorithm.h>
+#include <gpu/morphology/entry_points.h>
+#include <gpu/morphology/enums.h>
+#include <gpu/morphology/kernel_tables.h>
+#include <gpu/morphology/separable.h>
+#include <gpu/morphology/thresholds.h>
+#include <gpu/utils/backend.h>
+#include <gpu/utils/border_mode.h>
+#include <gpu/utils/declarations.h>
+#include <gpu/utils/launch.h>
+#include <gpu/utils/smem.h>
 
 #include <compat/check.h>
-#include <forward_fatbin.h>
 #include <morph_algorithm.h>
 #include <torch/csrc/stable/accelerator.h>
 #include <torch/csrc/stable/ops.h>
@@ -31,12 +27,6 @@ namespace serron {
 
 namespace {
 
-/// The forward kernels' fatbin, embedded at build time and loaded on first use.
-CUlibrary forward_library() {
-    static const CUlibrary library = load_kernel_library(serron_forward_fatbin, "forward");
-    return library;
-}
-
 /// Forward entry points for @p op on @c scalar_t, looked up by name on first use; specialised per dtype below.
 template <typename scalar_t>
 const ForwardKernels<scalar_t>& forward_kernels(MorphOp op);
@@ -47,13 +37,13 @@ const ForwardKernels<scalar_t>& forward_kernels(MorphOp op);
     template <>                                                                                                        \
     const ForwardKernels<scalar_t>& forward_kernels<scalar_t>(const MorphOp op) {                                      \
         static const std::array<ForwardKernels<scalar_t>, 2> table = [] {                                              \
-            const CUlibrary library = forward_library();                                                               \
+            const Library library = kernel_library(KernelFile::kForward);                                              \
             return std::array<ForwardKernels<scalar_t>, 2>{                                                            \
-                SERRON_CUDA_FOR_EACH_OP(SERRON_FORWARD_TABLE_ROW, scalar_t, suffix)};                                  \
+                SERRON_FOR_EACH_OP(SERRON_FORWARD_TABLE_ROW, scalar_t, suffix)};                                       \
         }();                                                                                                           \
         return table[static_cast<int>(op)];                                                                            \
     }
-SERRON_CUDA_FOR_EACH_DTYPE(SERRON_FORWARD_TABLE)
+SERRON_FOR_EACH_DTYPE(SERRON_FORWARD_TABLE)
 
 /**
  * Chains the row pass (@p input -> @p scratch) into the column pass (@p scratch ->
@@ -75,7 +65,7 @@ SERRON_CUDA_FOR_EACH_DTYPE(SERRON_FORWARD_TABLE)
 template <typename scalar_t>
 bool launch_morphology_separable(const ForwardKernels<scalar_t>& kernels, const scalar_t* input, scalar_t* scratch,
                                  scalar_t* output, int64_t N, int64_t C, int64_t H, int64_t W, int64_t kH, int64_t kW,
-                                 BorderMode border, CUstream stream) {
+                                 BorderMode border, Stream stream) {
     const Dim3 block(LINE_TILE);
     const size_t budget = smem_budget();
 
@@ -114,7 +104,7 @@ template <typename scalar_t>
 void launch_morphology(const ForwardKernels<scalar_t>& kernels, const scalar_t* input, const scalar_t* kernel,
                        scalar_t* output, scalar_t* scratch, Algorithm algorithm, bool may_fall_back, int64_t N,
                        int64_t C, int64_t H, int64_t W, int64_t kH, int64_t kW, int64_t kernel_channel_stride,
-                       BorderMode border, CUstream stream) {
+                       BorderMode border, Stream stream) {
     const size_t budget = smem_budget();
 
     if (algorithm == Algorithm::kSeparable) {
@@ -203,9 +193,8 @@ Tensor morphology_impl(const Tensor& input, const Tensor& kernel, int64_t border
     const bool is_flat = algorithm_needs_flatness(requested) && resolve_flat(flat, kernel_c);
 
     const torch::stable::accelerator::DeviceGuard device_guard(input_c.get_device_index());
-    const CurrentContextGuard context_guard(input_c.get_device_index());
-    const auto stream =
-        static_cast<CUstream>(torch::stable::accelerator::getCurrentStream(input_c.get_device_index()).nativeHandle());
+    const ContextGuard context_guard(input_c.get_device_index());
+    const Stream stream = current_stream(input_c.get_device_index());
     const auto border_mode = static_cast<BorderMode>(border);
 
     THO_DISPATCH_V2(

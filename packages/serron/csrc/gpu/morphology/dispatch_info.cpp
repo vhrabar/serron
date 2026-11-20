@@ -1,10 +1,10 @@
 #include "ops.h"
 
-#include <cuda/morphology/algorithm.h>
-#include <cuda/morphology/separable.h>
-#include <cuda/morphology/thresholds.h>
-#include <cuda/utils/declarations.h>
-#include <cuda/utils/smem.h>
+#include <gpu/morphology/algorithm.h>
+#include <gpu/morphology/separable.h>
+#include <gpu/morphology/thresholds.h>
+#include <gpu/utils/declarations.h>
+#include <gpu/utils/smem.h>
 
 #include <compat/check.h>
 #include <morph_algorithm.h>

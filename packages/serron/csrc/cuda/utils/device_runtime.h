@@ -1,0 +1,6 @@
+#ifndef SERRON_CUDA_DEVICE_RUNTIME_H
+#define SERRON_CUDA_DEVICE_RUNTIME_H
+
+#include <cuda_runtime.h>
+
+#endif // SERRON_CUDA_DEVICE_RUNTIME_H

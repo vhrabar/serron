@@ -1,5 +1,5 @@
-#ifndef SERRON_CUDA_MORPHOLOGY_ARG_TAP_H
-#define SERRON_CUDA_MORPHOLOGY_ARG_TAP_H
+#ifndef SERRON_GPU_MORPHOLOGY_ARG_TAP_H
+#define SERRON_GPU_MORPHOLOGY_ARG_TAP_H
 
 #include <cstdint>
 
@@ -20,4 +20,4 @@ struct ArgTap {
 
 } // namespace serron
 
-#endif // SERRON_CUDA_MORPHOLOGY_ARG_TAP_H
+#endif // SERRON_GPU_MORPHOLOGY_ARG_TAP_H

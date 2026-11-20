@@ -1,11 +1,11 @@
-#ifndef SERRON_CUDA_MORPHOLOGY_KERNEL_TABLES_H
-#define SERRON_CUDA_MORPHOLOGY_KERNEL_TABLES_H
+#ifndef SERRON_GPU_MORPHOLOGY_KERNEL_TABLES_H
+#define SERRON_GPU_MORPHOLOGY_KERNEL_TABLES_H
 
-#include <cuda/morphology/entry_points.h>
-#include <cuda/utils/launch.h>
+#include <gpu/morphology/entry_points.h>
+#include <gpu/utils/launch.h>
 
 /**
- * Host-side tables of the kernel handles for one (op, dtype), filled from the embedded fatbins by name.
+ * Host-side tables of the kernel handles for one (op, dtype), filled from the embedded kernel images by name.
  */
 
 namespace serron {
@@ -38,4 +38,4 @@ struct BackwardKernels {
 
 } // namespace serron
 
-#endif // SERRON_CUDA_MORPHOLOGY_KERNEL_TABLES_H
+#endif // SERRON_GPU_MORPHOLOGY_KERNEL_TABLES_H

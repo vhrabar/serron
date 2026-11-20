@@ -1,0 +1,6 @@
+#ifndef SERRON_ROCM_DEVICE_RUNTIME_HIP_H
+#define SERRON_ROCM_DEVICE_RUNTIME_HIP_H
+
+#include <hip/hip_runtime.h>
+
+#endif // SERRON_ROCM_DEVICE_RUNTIME_HIP_H
