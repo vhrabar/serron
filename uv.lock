@@ -1773,7 +1773,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-benchmark" },
     { name = "ruff", specifier = "==0.17.5" },
-    { name = "scikit-build-core" },
+    { name = "scikit-build-core", specifier = "==1.1.1" },
 ]
 rocm-gfx1036 = [
     { name = "rocm", extras = ["device-gfx1036"], marker = "platform_machine == 'x86_64' and sys_platform == 'linux'", specifier = "==10.0.*", index = "https://download.pytorch.org/whl/rocm10.0" },

@@ -80,7 +80,7 @@ dev = [
     "ruff==0.17.5",
     "pyrefly",
     "prek",
-    "scikit-build-core",
+    "scikit-build-core==1.1.1",
     "cmake==4.4.4",
     "ninja",
 ]
