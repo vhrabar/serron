@@ -81,7 +81,7 @@ dev = [
     "pyrefly",
     "prek",
     "scikit-build-core",
-    "cmake==4.4.4",
+    "cmake==4.4.5",
     "ninja",
 ]
 cpu = ["torch==2.13.*"]
