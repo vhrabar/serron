@@ -3,7 +3,7 @@ name = "serron-workspace"
 version = "0"
 dependencies = [
     "kornia>=0.9.1; sys_platform != 'win32' or platform_machine != 'ARM64'",
-    "scikit-build-core==1.1.1",
+    "scikit-build-core==1.1.2",
     "scipy-stubs~=1.18.1.1",
     "serron",
     "torch>=2.13",
@@ -80,8 +80,8 @@ dev = [
     "ruff==0.17.5",
     "pyrefly",
     "prek",
-    "scikit-build-core==1.1.1",
-    "cmake==4.4.4",
+    "scikit-build-core==1.1.2",
+    "cmake==4.4.5",
     "ninja",
 ]
 cpu = ["torch==2.13.*"]
