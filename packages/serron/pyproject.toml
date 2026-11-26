@@ -70,12 +70,12 @@ Changelog = "https://github.com/vhrabar/serron/blob/main/CHANGELOG.md"
 
 
 [build-system]
-requires = ["scikit-build-core==1.1.1"]
+requires = ["scikit-build-core==1.1.2"]
 build-backend = "scikit_build_core.build"
 
 
 [dependency-groups]
-build = ["scikit-build-core==1.1.1", "cmake", "ninja"]
+build = ["scikit-build-core==1.1.2", "cmake", "ninja"]
 
 
 
